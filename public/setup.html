@@ -1,38 +1,102 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up Note</title>
-<style>body{font:15px/1.8 system-ui,sans-serif;color:#39323f;background:#faf9f6;max-width:780px;margin:50px auto;padding:0 24px 70px}h1,h2{line-height:1.4}h1{font-size:32px}h2{margin-top:42px;font-size:23px}a{color:#7760d5}li{margin-bottom:8px}pre{max-height:320px;overflow:auto;padding:18px;background:#f0edf6;border-radius:9px;font-size:11px;line-height:1.6;white-space:pre-wrap}button{background:#7760d5;color:#fff;border:0;border-radius:7px;padding:11px 16px;cursor:pointer;font:inherit}code{background:#f0edf6;padding:2px 4px;border-radius:3px}small,header>p{color:#8b8094}.callout{background:#f0edf6;border-radius:9px;padding:17px 20px}.status{margin-left:10px;font-size:12px}</style></head>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Set up Note — Google login and private Drive images</title>
+<style>
+*{box-sizing:border-box}body{font:15px/1.8 system-ui,sans-serif;color:#39323f;background:#faf9f6;max-width:820px;margin:42px auto;padding:0 24px 70px}h1,h2{line-height:1.4}h1{font-size:32px}h2{margin-top:38px;font-size:23px}a{color:#7056ce}li{margin-bottom:9px}code{background:#f0edf6;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{overflow:auto;padding:16px;background:#f0edf6;border-radius:9px;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}button{background:#7760d5;color:#fff;border:0;border-radius:7px;padding:9px 14px;cursor:pointer;font:inherit}small,header>p,.muted{color:#796f83}.callout{background:#f0edf6;border-radius:10px;padding:16px 20px;margin:20px 0}.status{margin-left:10px;font-size:12px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid #e5e0ea}th{font-size:12px;letter-spacing:.06em;text-transform:uppercase}td:first-child{width:68%}.done{color:#427348}.pending{color:#886518}.value{background:#fff;border:1px solid #e5e0ea;border-radius:9px;padding:14px 16px;margin:12px 0}.value strong{display:block;font-size:12px;margin-bottom:6px}.value code{display:block;white-space:pre-wrap;background:transparent;padding:0;margin-bottom:10px}details{margin-top:24px}summary{cursor:pointer;font-weight:600}@media(max-width:500px){body{margin-top:22px;padding:0 18px 50px}h1{font-size:27px}td,th{padding:8px 6px}.callout{padding:14px 16px}}
+</style>
+</head>
 <body>
-<header><a href="./">← Back to Note</a><h1>Your workspace, anywhere.</h1><p>App owner setup. People using Note only need to sign in with Google.</p></header>
-<h2>1. Connect Supabase</h2>
+<header><a href="./">← Back to Note</a><h1>Google login. Your own Drive.</h1><p>A step-by-step guide for the app owner. Complete this once; each person can then sign in with their Google account.</p></header>
+<div class="callout"><strong>The Note website and Supabase database are already ready.</strong> Your remaining setup is Google login and Drive permission. The tables in Supabase are the app's storage structure; your Note account is created when you first sign in through the website.</div>
+<table aria-label="Setup checklist"><thead><tr><th>Setup</th><th>Status</th></tr></thead><tbody>
+<tr><td>GitHub Pages website</td><td class="done">Complete</td></tr>
+<tr><td>Supabase folders, boards, image metadata and ownership rules</td><td class="done">Complete</td></tr>
+<tr><td>Supabase site URL and production redirect allowlist</td><td class="done">Complete</td></tr>
+<tr><td>Google Cloud project named <strong>Note Canvas</strong></td><td class="done">Created</td></tr>
+<tr><td>Google Drive API in Note Canvas</td><td class="done">Enabled</td></tr>
+<tr><td>Google registration, test users, scopes and OAuth client</td><td class="pending">Follow steps below</td></tr>
+<tr><td>Google credentials in Supabase and first Google sign-in</td><td class="pending">Follow steps below</td></tr>
+</tbody></table>
+<p class="muted">This checklist records the initial setup. It does not inspect your account live. After completing the Google steps, use the test in step 6 to confirm everything works.</p>
+<h2>1. Finish Google app registration</h2>
 <ol>
-<li>Open your project at <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">Supabase Dashboard</a>. Stay on the Free plan.</li>
-<li>This app's Supabase database is already configured. For a new project, run the SQL setup below in <strong>SQL Editor</strong>. It creates folders, boards, and image references with access limited to their owner.</li>
-<li>Use your project's browser-safe publishable key and URL in Note Settings or build configuration. Never use a service-role or secret key in the browser.</li>
-<li>In <strong>Authentication → URL Configuration</strong>, set Site URL and Redirect URLs to your Note website, including the repository path. For local testing, add <code>http://127.0.0.1:5173/</code>.</li>
+<li>Open <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">Google Auth Platform</a>. Select the <strong>Note Canvas</strong> project using the project selector at the top.</li>
+<li>If the setup wizard is still open at <strong>Finish</strong>, review Google's User Data Policy, tick the agreement if you accept it, then click <strong>Continue → Create</strong>.</li>
+<li>If you need to start again, click <strong>Get started</strong>. Enter app name <strong>Note</strong>, choose your Google email as User support email, and click <strong>Next</strong>.</li>
+<li>Choose <strong>External</strong> for Audience, click Next, enter your email for Contact Information, then Next. Review the agreement yourself and finish with Continue → Create.</li>
 </ol>
-<button id="copy">Copy SQL setup</button><span class="status" id="copy-status" role="status"></span><pre id="sql">Loading setup…</pre>
-<h2 id="google-drive">2. Enable Google sign-in and Drive</h2>
-<p><strong>Configure this once for the app.</strong> Each person then chooses Continue with Google, authorizes app-created files, and saves images in their own private <strong>Note images</strong> folder. Supabase holds file IDs and searchable text. No public sharing links are created.</p>
+<p>The app starts in Testing. That is enough to get your own account working. <a href="https://developers.google.com/workspace/guides/configure-oauth-consent" target="_blank" rel="noreferrer">Google's registration instructions</a>.</p>
+<h2>2. Add the Google accounts that may test Note</h2>
 <ol>
-<li>Choose a project in <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud Console</a> and enable <strong>Google Drive API</strong>.</li>
-<li>Configure <strong>Google Auth Platform</strong> branding and audience. Add <code>openid</code>, <code>userinfo.email</code>, <code>userinfo.profile</code>, and <code>https://www.googleapis.com/auth/drive.file</code>. While in Testing, add each allowed Google account as a test user.</li>
-<li>Create an <strong>OAuth client → Web application</strong>. Authorized JavaScript origins: <code>https://augustof2022.github.io</code> and <code>http://127.0.0.1:5173</code>. Origins have no repository path.</li>
-<li>Authorized redirect URI: <code>https://wrkoxjlzdeiffdtgbyvq.supabase.co/auth/v1/callback</code>. If using another Supabase project, use that project's Google callback instead.</li>
-<li>In <strong>Supabase → Authentication → Sign In / Providers → Google</strong>, enable Google and enter the OAuth client ID and client secret <strong>there</strong>. Keep the secret out of Note settings, frontend environment variables, GitHub, and chat.</li>
-<li>Allow the Note site in Supabase's redirect URLs, for example <code>https://augustof2022.github.io/notes/</code> and the local URL above.</li>
-<li>In Note choose <strong>Continue with Google</strong>, then grant the Drive permission. New images automatically use that person's Drive. Use the same Google account on every device.</li>
+<li>In Google Auth Platform, open <strong>Audience</strong>.</li>
+<li>Leave Publishing status as <strong>Testing</strong> for your first setup.</li>
+<li>Under <strong>Test users</strong>, click <strong>Add users</strong>.</li>
+<li>Enter the Google email you will use in Note, plus any other accounts you want to test. Click <strong>Save</strong>.</li>
 </ol>
-<div class="callout">Google may ask you to reconnect after reloading Note or when Drive access expires. Your local images remain saved while uploads wait. Note's Google tokens stay in memory; its saved Supabase session omits Google access and refresh tokens.</div>
-<p><small>For personal use, you may disable new Supabase signups after creating your account. If other people will use Note, keep signups enabled and configure the Google consent audience accordingly. Each account's database records remain private.</small></p>
-<h2>3. Publish on GitHub Pages</h2>
+<p>While in Testing, each Google account that uses Note must be on this list. You can use one account on multiple devices. Other people do not each need a Cloud project.</p>
+<h2>3. Add the four required permissions</h2>
 <ol>
-<li>Put the app source in your GitHub repository. Keep personal notes, backups, and secret keys out of it.</li>
-<li>Open <strong>Repository Settings → Pages</strong> and choose <strong>GitHub Actions</strong>. The included workflow tests, builds, and publishes on a push to main.</li>
-<li>Optional browser-safe repository variables: <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>. Google credentials stay in Supabase's Google provider settings.</li>
-<li>Free GitHub Pages needs a public repository. A private repository needs a supported paid plan or a different static host.</li>
+<li>Open <strong>Data Access → Add or remove scopes</strong>.</li>
+<li>Select the four scopes below. If one is missing, add its exact value under <strong>Manually add scopes</strong>.</li>
+<li>Click <strong>Update</strong>, then <strong>Save</strong> if shown. Check all four appear in the saved list.</li>
 </ol>
-<h2>Your device boards and backups</h2>
-<p>Device boards stay separate when you sign in. Use <strong>Settings → Cloud sync → Copy this device's boards into my account</strong> to migrate them. Email sign-in and Supabase image storage remain available as alternatives.</p>
-<p>Use <strong>Settings → Preferences & backup → Export backup</strong> before clearing browser data. Backups contain private content. Changing the image provider affects new uploads; existing references keep their original provider. Free OCR reads printed English screenshot text.</p>
-<script>let sql='';fetch('./setup.sql').then(r=>{if(!r.ok)throw new Error();return r.text()}).then(text=>{sql=text;document.getElementById('sql').textContent=text}).catch(()=>{document.getElementById('sql').textContent='Open supabase/schema.sql in the source repository.'});document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(sql);document.getElementById('copy-status').textContent='Copied'}catch{document.getElementById('copy-status').textContent='Select the script below and copy it.'}};</script>
+<div class="value"><strong>Required scopes</strong><code id="scopes">openid
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy scopes</button><span class="status" role="status"></span></div>
+<p><code>drive.file</code> allows Note to work with files it creates or that you explicitly give it access to. Note creates a private <strong>Note images</strong> folder automatically; you do not need to create or share it yourself. <a href="https://developers.google.com/workspace/drive/api/guides/api-specific-auth" target="_blank" rel="noreferrer">Google's Drive scope documentation</a>.</p>
+<h2>4. Create the Google OAuth client</h2>
+<ol>
+<li>Open <strong>Clients → Create client</strong>.</li>
+<li>Application type: <strong>Web application</strong>. Name: <strong>Note Web</strong>.</li>
+<li>Under Authorized JavaScript origins, click <strong>Add URI</strong> and paste the origin below.</li>
+<li>Under Authorized redirect URIs, click <strong>Add URI</strong> and paste the Supabase callback below.</li>
+<li>Click <strong>Create</strong> yourself. Save the displayed Client ID and Client Secret privately. Google may show the secret only once.</li>
+</ol>
+<div class="value"><strong>Authorized JavaScript origin — no /notes/ path</strong><code id="origin">https://augustof2022.github.io</code><button data-copy="origin">Copy origin</button><span class="status" role="status"></span></div>
+<div class="value"><strong>Authorized redirect URI — Google's callback goes to Supabase</strong><code id="callback">https://wrkoxjlzdeiffdtgbyvq.supabase.co/auth/v1/callback</code><button data-copy="callback">Copy callback</button><span class="status" role="status"></span></div>
+<p>These are for the live site. Local development is optional. <a href="https://support.google.com/cloud/answer/15549257" target="_blank" rel="noreferrer">Google's OAuth client instructions</a>.</p>
+<h2>5. Put the credentials into Supabase</h2>
+<ol>
+<li>Open <a href="https://supabase.com/dashboard/project/wrkoxjlzdeiffdtgbyvq/auth/providers?provider=Google" target="_blank" rel="noreferrer">your Supabase Google provider</a>.</li>
+<li>Switch on <strong>Enable Sign in with Google</strong>.</li>
+<li>Replace the current Client IDs value with the generated OAuth <strong>Client ID</strong>. It ends in <code>.apps.googleusercontent.com</code>.</li>
+<li>Replace Client Secret (for OAuth) with the <strong>Client Secret from Google Cloud</strong>. Both must belong to the same Note Web client.</li>
+<li>Keep <strong>Skip nonce checks</strong> and <strong>Allow users without an email</strong> off. Click <strong>Save</strong>.</li>
+</ol>
+<div class="callout">Enter the generated ID and secret directly into Supabase yourself. A Google email address is not a Client ID. Keep the secret out of chat, Note settings, GitHub and frontend environment variables.</div>
+<p><a href="https://supabase.com/dashboard/project/wrkoxjlzdeiffdtgbyvq/auth/url-configuration" target="_blank" rel="noreferrer">Supabase URL Configuration</a> is already set to the value below for both Site URL and Redirect URLs. Leave it in place. <a href="https://supabase.com/docs/guides/auth/social-login/auth-google" target="_blank" rel="noreferrer">Supabase's Google login guide</a>.</p>
+<div class="value"><strong>Supabase Site URL and allowed app redirect</strong><code id="site">https://augustof2022.github.io/notes/</code><button data-copy="site">Copy site URL</button><span class="status" role="status"></span></div>
+<h2>6. Sign in and test an image</h2>
+<ol>
+<li>Open <a href="./">Note</a>, click <strong>Sign in to sync → Continue with Google</strong>, and choose an account you added under Test users.</li>
+<li>Review Google's consent screen and approve access to app-created Drive files if you agree. Finish sign-in yourself.</li>
+<li>Create a board named <strong>Sync test</strong>, add a typed note, and paste a screenshot with <strong>Ctrl+V</strong>.</li>
+<li>Press <strong>Ctrl+S</strong> and wait until the header says <strong>Synced</strong>. “Saved locally” means device storage; “Sync pending” means the upload has not finished.</li>
+<li>In Google Drive, look for <strong>Note images</strong> and the uploaded image. In Supabase Authentication → Users, your new Note login should appear. Board and image-reference records will appear in the Note tables.</li>
+<li>Open Note on your phone or another browser, sign in with the same Google account, and check that the typed note and screenshot appear.</li>
+</ol>
+<p>For boards created before signing in, use <strong>Settings &amp; storage → Cloud sync → Copy this device's boards into my account</strong>. Device boards and signed-in boards stay separate until you copy them.</p>
+<h2>If something fails</h2>
+<table aria-label="Setup troubleshooting"><thead><tr><th>What you see</th><th>What to check</th></tr></thead><tbody>
+<tr><td>Google sign-in is not set up yet</td><td>Enable Google in Supabase and save its credentials.</td></tr>
+<tr><td>invalid_client</td><td>Use the generated OAuth Client ID and matching Client Secret.</td></tr>
+<tr><td>redirect_uri_mismatch</td><td>Google's Authorized redirect URI must exactly match the callback in step 4.</td></tr>
+<tr><td>Access denied while in Testing</td><td>Add the selected Google account under Audience → Test users.</td></tr>
+<tr><td>Board text syncs but images wait</td><td>Check Drive API, drive.file, and Drive consent. Reconnect in Note's Images &amp; search settings.</td></tr>
+<tr><td>Google shows an unverified-app warning</td><td>Pause and review the configuration or complete Google's verification.</td></tr>
+</tbody></table>
+<p>Google credential changes can take time to propagate. After correcting values, allow a few minutes before trying again.</p>
+<h2>Costs, access and reconnecting</h2>
+<p>Standard Drive API use is currently available at no additional cost within Google's quotas; your Drive storage allowance applies. This setup uses OAuth and Drive API. It does not need Cloud Run, a service account, an API key or a paid OCR service. <a href="https://developers.google.com/workspace/drive/api/guides/limits" target="_blank" rel="noreferrer">Current Drive limits and pricing</a>.</p>
+<p>Testing gets your own account working. For users outside the test-user list, review <strong>Audience → Publish app</strong> and any branding or verification requirements Google shows. Public GitHub code does not publish your boards or share Drive files.</p>
+<p>Drive access may need reconnecting after reloading Note or after about 50 minutes. Use <strong>Settings &amp; storage → Images &amp; search → Continue with Google / Reconnect Google Drive</strong>. Local images remain saved while uploads wait. Export a backup before clearing browser data.</p>
+<details><summary>Using a different Supabase project</summary><p>The current project is already configured. For a replacement, run the SQL below, enter its URL and publishable key in Note, set its auth URLs, and use its own Google callback. Never use a secret or service-role key in the browser.</p><button id="copy-sql">Copy SQL setup</button><span class="status" id="sql-status" role="status"></span><pre id="sql">Loading setup…</pre></details>
+<script>
+document.querySelectorAll('[data-copy]').forEach(button => {button.addEventListener('click',async()=>{const output=button.nextElementSibling;try{await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());output.textContent='Copied';}catch{output.textContent='Select the value above and copy it.';}});});
+let sql='';fetch('./setup.sql').then(response=>{if(!response.ok)throw new Error();return response.text();}).then(text=>{sql=text;document.getElementById('sql').textContent=text;}).catch(()=>{document.getElementById('sql').textContent='Open supabase/schema.sql in the source repository.';});
+document.getElementById('copy-sql').addEventListener('click',async()=>{try{if(!sql)throw new Error();await navigator.clipboard.writeText(sql);document.getElementById('sql-status').textContent='Copied';}catch{document.getElementById('sql-status').textContent='Select the script below and copy it.';}});
+</script>
 </body></html>
