@@ -19,7 +19,8 @@
 <tr><td>Google app registration and four required scopes</td><td class="done">Complete</td></tr>
 <tr><td>Your Google account on the test-user list</td><td class="done">Added</td></tr>
 <tr><td>Google OAuth client named <strong>Web client 1</strong></td><td class="done">Created</td></tr>
-<tr><td>Google credentials in Supabase and first Google sign-in</td><td class="pending">Follow steps below</td></tr>
+<tr><td>Google provider in Supabase</td><td class="done">Enabled; credentials saved</td></tr>
+<tr><td>First Google sign-in and Drive upload</td><td class="pending">Test in step 6</td></tr>
 </tbody></table>
 <p class="muted">This checklist records the initial setup. It does not inspect your account live. After completing the Google steps, use the test in step 6 to confirm everything works.</p>
 <h2>1. Finish Google app registration</h2>
@@ -64,6 +65,7 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <div class="value"><strong>Authorized redirect URI — Google's callback goes to Supabase</strong><code id="callback">https://wrkoxjlzdeiffdtgbyvq.supabase.co/auth/v1/callback</code><button data-copy="callback">Copy callback</button><span class="status" role="status"></span></div>
 <p>These are for the live site. Local development is optional. <a href="https://support.google.com/cloud/answer/15549257" target="_blank" rel="noreferrer">Google's OAuth client instructions</a>.</p>
 <h2>5. Put the credentials into Supabase</h2>
+<p>The Google provider is now enabled and you have saved its credentials. Continue to step 6 to check the complete sign-in and image upload.</p>
 <ol>
 <li>Open <a href="https://supabase.com/dashboard/project/wrkoxjlzdeiffdtgbyvq/auth/providers?provider=Google" target="_blank" rel="noreferrer">your Supabase Google provider</a>.</li>
 <li>Switch on <strong>Enable Sign in with Google</strong>.</li>
@@ -77,7 +79,7 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <h2>6. Sign in and test an image</h2>
 <ol>
 <li>Open <a href="./">Note</a>, click <strong>Sign in to sync → Continue with Google</strong>, and choose an account you added under Test users.</li>
-<li>Review Google's consent screen and approve access to app-created Drive files if you agree. Finish sign-in yourself.</li>
+<li>Google may first show <strong>Google hasn't verified this app</strong> because Note Canvas is in Testing. Review this warning yourself and decide whether to continue with the app you configured. Then review the consent screen and approve the requested Google identity and app-created Drive file access if you agree. Finish sign-in yourself.</li>
 <li>Create a board named <strong>Sync test</strong>, add a typed note, and paste a screenshot with <strong>Ctrl+V</strong>.</li>
 <li>Press <strong>Ctrl+S</strong> and wait until the header says <strong>Synced</strong>. “Saved locally” means device storage; “Sync pending” means the upload has not finished.</li>
 <li>In Google Drive, look for <strong>Note images</strong> and the uploaded image. In Supabase Authentication → Users, your new Note login should appear. Board and image-reference records will appear in the Note tables.</li>
@@ -91,9 +93,10 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <tr><td>redirect_uri_mismatch</td><td>Google's Authorized redirect URI must exactly match the callback in step 4.</td></tr>
 <tr><td>Access denied while in Testing</td><td>Add the selected Google account under Audience → Test users.</td></tr>
 <tr><td>Board text syncs but images wait</td><td>Check Drive API, drive.file, and Drive consent. Reconnect in Note's Images &amp; search settings.</td></tr>
-<tr><td>Google shows an unverified-app warning</td><td>Pause and review the configuration or complete Google's verification.</td></tr>
+<tr><td>Google shows an unverified-app warning</td><td>Testing apps show a warning. Review the app and requested permissions yourself before deciding whether to continue. For production, review Google's verification requirements.</td></tr>
 </tbody></table>
 <p>Google credential changes can take time to propagate. After correcting values, allow a few minutes before trying again.</p>
+<p>Google displays a warning for test-user authorization, and authorizations in Testing expire after seven days when Drive scopes are requested. Reconnect when Google asks. <a href="https://support.google.com/cloud/answer/15549945?hl=en" target="_blank" rel="noreferrer">Google's testing and audience documentation</a>.</p>
 <h2>Costs, access and reconnecting</h2>
 <p>Standard Drive API use is currently available at no additional cost within Google's quotas; your Drive storage allowance applies. This setup uses OAuth and Drive API. It does not need Cloud Run, a service account, an API key or a paid OCR service. <a href="https://developers.google.com/workspace/drive/api/guides/limits" target="_blank" rel="noreferrer">Current Drive limits and pricing</a>.</p>
 <p>Testing gets your own account working. For users outside the test-user list, review <strong>Audience → Publish app</strong> and any branding or verification requirements Google shows. Public GitHub code does not publish your boards or share Drive files.</p>
