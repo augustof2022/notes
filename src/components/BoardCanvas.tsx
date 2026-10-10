@@ -1,0 +1,145 @@
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, exportToBlob } from '@excalidraw/excalidraw';
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
+import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from '@excalidraw/excalidraw/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { ImagePlus, Loader2 } from 'lucide-react';
+import type { Board, Settings } from '../types';
+import { db, touch } from '../lib/db';
+import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
+import { queueOcr } from '../lib/ocr';
+import { downloadAsset } from '../lib/sync';
+import { recordKey } from '../types';
+
+export interface CanvasHandle {
+  flush: () => Promise<void>;
+  exportPng: () => Promise<Blob | null>;
+  jumpTo: (elementId: string) => void;
+  reloadImages: () => Promise<void>;
+}
+function cleanAppState(state: AppState): Partial<AppState> {
+  return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
+    currentItemFontFamily: state.currentItemFontFamily, currentItemRoughness: state.currentItemRoughness,
+    gridSize: state.gridSize, gridStep: state.gridStep, gridModeEnabled: state.gridModeEnabled };
+}
+function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<AppState>) {
+  return `${elements.map(x => `${x.id}:${x.version}:${x.isDeleted}`).join('|')}:${JSON.stringify(state)}`;
+}
+export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
+  const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
+  const initialSignature = useRef(sceneSignature(board.elements, board.appState));
+  const lastSignature = useRef(initialSignature.current);
+  const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Partial<AppState>; files: BinaryFiles } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const saving = useRef(Promise.resolve());
+  const booted = useRef(false);
+  const latest = useRef({ settings, onSaved, onMessage }); latest.current = { settings, onSaved, onMessage };
+  async function loadFiles() {
+    if (client) {
+      for (const id of board.assetIds) {
+        const asset = await db.assets.get(recordKey(board.scope, id));
+        if (asset && !asset.dataURL) {
+          try { await downloadAsset(client, asset); }
+          catch (error) { onMessage(error instanceof Error ? error.message : 'Could not load an image. Reconnect storage and try again.'); }
+        }
+      }
+    }
+    return localSceneFiles(board.scope, board.assetIds);
+  }
+  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { ...board.appState, theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
+  async function flush() {
+    if (timer.current) clearTimeout(timer.current);
+    const snapshot = pending.current; pending.current = null;
+    if (snapshot) {
+      saving.current = saving.current.catch(() => {}).then(async () => {
+        const assets = await storeSceneFiles(board.scope, snapshot.files, latest.current.settings.ocrEnabled);
+        await db.boards.update(board.key, { elements: snapshot.elements, appState: snapshot.state,
+          assetIds: [...new Set(snapshot.elements.filter(x => x.type === 'image' && !x.isDeleted).map(x => x.type === 'image' ? x.fileId : null).filter((x): x is NonNullable<typeof x> => !!x))], ...touch() });
+        for (const asset of assets) if (latest.current.settings.ocrEnabled) queueOcr(asset);
+        latest.current.onSaved();
+      }).catch(error => { pending.current ||= snapshot; latest.current.onMessage(`Could not save: ${error instanceof Error ? error.message : 'device storage is unavailable'}. Export your board before closing.`); throw error; });
+    }
+    await saving.current;
+  }
+  function changed(elements: readonly ExcalidrawElement[], state: AppState, files: BinaryFiles) {
+    const clean = cleanAppState(state); const signature = sceneSignature(elements, clean);
+    setEmpty(!elements.some(x => !x.isDeleted));
+    if (!booted.current) { booted.current = true; lastSignature.current = signature; return; }
+    if (lastSignature.current === signature) return;
+    lastSignature.current = signature;
+    // Copy now: canvas file maps and app state can mutate during a delayed save.
+    pending.current = { elements: structuredClone(elements), state: structuredClone(clean), files: { ...files } };
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { void flush().catch(() => {}); }, 300);
+  }
+  function jumpTo(elementId: string) {
+    if (!api) return;
+    const element = api.getSceneElements().find(x => x.id === elementId);
+    if (!element) return;
+    api.updateScene({ appState: { selectedElementIds: { [elementId]: true } } });
+    api.scrollToContent(element, { fitToContent: true, animate: true, maxZoom: 1.4 });
+  }
+  useImperativeHandle(ref, () => ({ flush, jumpTo,
+    reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
+    exportPng: async () => {
+      await flush(); if (!api || !api.getSceneElements().length) return null;
+      return exportToBlob({ elements: api.getSceneElements(), appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: settings.theme === 'dark' }, files: api.getFiles(), mimeType: 'image/png' });
+    }
+  }), [api, settings.theme]);
+  useEffect(() => {
+    const flushOnHide = () => { if (document.visibilityState === 'hidden') void flush().catch(() => {}); };
+    const beforeUnload = (event: BeforeUnloadEvent) => { if (pending.current) { event.preventDefault(); void flush().catch(() => {}); } };
+    document.addEventListener('visibilitychange', flushOnHide); window.addEventListener('beforeunload', beforeUnload);
+    return () => { document.removeEventListener('visibilitychange', flushOnHide); window.removeEventListener('beforeunload', beforeUnload); void flush().catch(() => {}); };
+  }, []);
+  useEffect(() => { if (api && jumpId) jumpTo(jumpId); }, [api, jumpId]);
+  useEffect(() => {
+    if (!api) return;
+    const paste = (event: ClipboardEvent) => {
+      const target = document.activeElement;
+      if (document.querySelector('.modal-backdrop') || target?.closest('input, textarea, [contenteditable="true"]')) return;
+      const images = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
+      const text = event.clipboardData?.getData('text/plain') || '';
+      // Let the editor handle its own structured object clipboard.
+      if (!images.length && (!text || text.includes('excalidraw/clipboard'))) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      void (async () => {
+        const state = api.getAppState();
+        const x = state.width / 2 / state.zoom.value - state.scrollX;
+        const y = state.height / 2 / state.zoom.value - state.scrollY;
+        const added: ExcalidrawElement[] = [];
+        if (images.length) {
+          for (const [index, image] of images.entries()) {
+            const bitmap = await createImageBitmap(image);
+            const width = Math.min(650, bitmap.width), height = bitmap.height * width / bitmap.width;
+            bitmap.close();
+            const hash = await crypto.subtle.digest('SHA-256', await image.arrayBuffer());
+            const id = Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('') as BinaryFileData['id'];
+            const dataURL = await blobToDataURL(image);
+            api.addFiles([{ id, dataURL, mimeType: image.type, created: Date.now() } as BinaryFileData]);
+            added.push(...convertToExcalidrawElements([{ type: 'image', x: x - width / 2 + index * 25, y: y - height / 2 + index * 25, width, height, fileId: id, status: 'saved', scale: [1, 1] }]));
+          }
+        } else added.push(...convertToExcalidrawElements([{ type: 'text', text, x: x - 140, y: y - 30, fontSize: 20, fontFamily: 2, width: 300 }]));
+        api.updateScene({ elements: [...api.getSceneElements(), ...added], appState: { selectedElementIds: Object.fromEntries(added.map(element => [element.id, true])) }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      })().catch(error => onMessage(`Could not paste: ${error instanceof Error ? error.message : 'unsupported clipboard image'}`));
+    };
+    document.addEventListener('paste', paste, true);
+    return () => document.removeEventListener('paste', paste, true);
+  }, [api]);
+  useEffect(() => {
+    if (!api || !booted.current || pending.current) return;
+    const signature = sceneSignature(board.elements, board.appState);
+    if (signature === lastSignature.current) return;
+    lastSignature.current = signature;
+    api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState } });
+    void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
+  }, [board.remoteRevision]);
+  return <div className="board-canvas">
+    {!api && <div className="canvas-loading"><Loader2 className="spinning" size={24} /> Opening your board…</div>}
+    <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
+      name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
+    {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
+    <div className="canvas-caption">Infinite room for your ideas</div>
+  </div>;
+});

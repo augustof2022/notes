@@ -1,0 +1,104 @@
+# Note
+
+A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
+
+## What works
+
+- Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor.
+- Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
+- Nested folders with rename, move, drag into another folder, and recoverable Trash.
+- Folder-scoped search across board names, typed notes, and recognized English screenshot text. Results jump to the matching element.
+- Local autosave in IndexedDB, partitioned by account, plus Supabase sync when configured and signed in.
+- Images stored in private Supabase Storage or a private Google Drive “Note images” folder. Supabase stores Drive file IDs and OCR text; image bytes are not embedded in cloud board JSON.
+- Free local OCR with bundled Tesseract.js workers, WASM, and English language data.
+- Installable PWA, light/dark appearance, PNG export, and portable workspace backups including images.
+- Revision checks preserve a conflict copy when two devices edit the same item.
+
+## Run
+
+```sh
+npm ci
+npm run dev
+```
+
+Open the Local URL printed by Vite. The app works without cloud configuration; it saves to that browser. For a production build:
+
+```sh
+npm test
+npm run build
+npm run preview
+```
+
+The postinstall script copies fonts, OCR assets, and the database setup into `public/`. Generated assets are ignored by Git. Do not interrupt the first install while these assets are copying.
+
+## Connect cloud sync
+
+This checkout is already configured for the browser-safe endpoint of your Supabase project, and its schema has been applied. Google sign-in needs the one-time provider setup below. Email accounts remain available as an alternative. The steps below also cover moving the app to another project.
+
+1. Create or select a **free Supabase project**.
+2. Run [`supabase/schema.sql`](supabase/schema.sql) in its SQL Editor. It creates account-isolated folders, boards, asset metadata, optimistic-save RPC, and a private image bucket. It is safe to rerun.
+3. Add the project URL and browser-safe publishable/anon key in the app’s Settings → Cloud sync. Alternatively set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build time.
+4. Set the site URL and redirect allowlist in Supabase Authentication → URL Configuration.
+5. Choose **Continue with Google** after configuring the Google provider below. It creates or signs into your Note account and requests permission to store images in your own Drive. Alternatively choose Use email instead. Your Note account is separate from the Supabase dashboard account.
+6. Sign in on another device to see your cloud boards. Automatic sync runs while the app is open every 20 seconds; Ctrl+S or the header status runs it immediately. Newly pasted images must finish uploading before a board is uploaded.
+
+Device boards stay separate when signing in. Use Settings → Cloud sync → Copy this device’s boards into my account to migrate them intentionally. Signing out returns to the device workspace.
+
+## Google Drive images
+
+The **Continue with Google** button combines Supabase Google login and the `drive.file` permission. Each person uses their own Google account, and new image uploads go to that person's private “Note images” folder. No public file permissions or access links are created. Email login and Supabase image storage remain available.
+
+This is a **one-time app owner setup**. People using Note do not need Google Cloud projects or client IDs:
+
+1. In Google Cloud Console, enable **Google Drive API** in a project.
+2. Configure Google Auth Platform with `openid`, `userinfo.email`, `userinfo.profile`, and `https://www.googleapis.com/auth/drive.file`. While the consent screen is in Testing, add each allowed Google account as a test user.
+3. Create an **OAuth client → Web application**. Add the app origin (e.g. `https://augustof2022.github.io` and `http://127.0.0.1:5173`) to Authorized JavaScript origins. Add **`https://wrkoxjlzdeiffdtgbyvq.supabase.co/auth/v1/callback`** to Authorized redirect URIs. Use your own project's callback if moving projects.
+4. In Supabase → Authentication → Sign In / Providers → Google, enable Google and enter the OAuth **client ID and client secret there**. Never put the client secret in Note settings, GitHub, frontend environment variables, or chat.
+5. In Supabase Authentication → URL Configuration, allow the deployed Note URL, including its repository path (e.g. `https://augustof2022.github.io/notes/`). Local testing also needs `http://127.0.0.1:5173/`.
+6. In Note, choose Continue with Google and grant permission for app-created Drive files. New uploads automatically use Google Drive. Use the same Google account on each device. For a personal-only app, you can disable new Supabase signups after creating your account; keep signups available if you intend other people to use their own accounts.
+
+The app checks the Google identity before using a Drive connection and blocks image requests from another Note account. Google access tokens stay in memory; the stored Supabase session omits Google access and refresh tokens. Google may require reconnection after reloading Note or when its access token expires. Supabase does not refresh Google's tokens. Images remain saved locally while uploads wait. A future server-side token refresh service would be needed for seamless long-lived Drive access.
+
+Images are uploaded automatically to “Note images”. Switching providers affects new uploads; existing image references retain their provider. Do not delete or move images out of the app’s folder unless you have a complete backup. Files deliberately stay in storage when a board moves to Trash so restoration works; storage garbage collection is not included.
+
+## GitHub Pages
+
+The included `.github/workflows/pages.yml` builds, tests, and deploys on push to `main`.
+
+1. Add source files to your repository. Never commit personal backups, board data, service-role keys, Google client secrets, or passwords.
+2. Repository Settings → Pages → Source: **GitHub Actions**.
+3. Optional repository **variables**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Google credentials are configured only in Supabase's provider settings.
+4. Push to main or manually run “Publish Note”. The workflow sets the repository URL prefix automatically.
+
+GitHub Free requires a public repository for Pages; a private repository requires a supported paid plan. The public app source contains no private board data. Supabase row-level security protects boards and image metadata; private storage policies protect image bytes.
+
+## Shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Find across boards | Ctrl+K |
+| New board | Ctrl+Alt+N |
+| New folder | Ctrl+Alt+Shift+N |
+| Save / sync | Ctrl+S |
+| Rename open board | F2 |
+| Paste image / text | Ctrl+V |
+| Undo / redo | Ctrl+Z / Ctrl+Y |
+| Duplicate selected object | Ctrl+D |
+| Add text | T |
+| Pan | Space+drag |
+| Zoom | Ctrl+scroll |
+| Shortcut guide | ? |
+
+Cmd replaces Ctrl on Mac. Browser-reserved Ctrl+N and Ctrl+Shift+N are avoided.
+
+## Backups and limits
+
+Export in Settings → Preferences & backup before clearing browser data. Exports download all referenced image files; reconnect Google Drive first if required. Import creates new boards rather than replacing current ones. Backups contain private content; keep them outside the source repository.
+
+OCR recognizes printed English text; small screenshots, low contrast, and handwriting can be inaccurate. This app does not reproduce Nebo’s proprietary handwriting recognition. Offline use requires a successful first production load so the service worker can cache the editor and OCR assets. External sign-in and cloud sync need internet. The PWA uses update prompts, so an update will not silently reload an active editor.
+
+Cloud sync is personal-device sync, not real-time multi-user collaboration. Supabase free quotas and Google Drive account storage limits apply. Image deletion and storage reclamation are intentionally not automated. Search scans the loaded account’s board content and OCR metadata on-device; large libraries will eventually need server-side search.
+
+## Validation
+
+`npm test` covers recursive folder scoping, typed and OCR search, deleted items, account separation, Trash, conflict preservation, SQL access policies, Google token storage, Google identity matching, declined Drive permission, expiry, and account switching. `npm run build` type-checks and generates the production site. Google OAuth must be enabled with the app owner's credentials before live sign-in and Drive uploads can be validated.

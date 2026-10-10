@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up Note</title>
+<style>body{font:15px/1.8 system-ui,sans-serif;color:#39323f;background:#faf9f6;max-width:780px;margin:50px auto;padding:0 24px 70px}h1,h2{line-height:1.4}h1{font-size:32px}h2{margin-top:42px;font-size:23px}a{color:#7760d5}li{margin-bottom:8px}pre{max-height:320px;overflow:auto;padding:18px;background:#f0edf6;border-radius:9px;font-size:11px;line-height:1.6;white-space:pre-wrap}button{background:#7760d5;color:#fff;border:0;border-radius:7px;padding:11px 16px;cursor:pointer;font:inherit}code{background:#f0edf6;padding:2px 4px;border-radius:3px}small,header>p{color:#8b8094}.callout{background:#f0edf6;border-radius:9px;padding:17px 20px}.status{margin-left:10px;font-size:12px}</style></head>
+<body>
+<header><a href="./">← Back to Note</a><h1>Your workspace, anywhere.</h1><p>App owner setup. People using Note only need to sign in with Google.</p></header>
+<h2>1. Connect Supabase</h2>
+<ol>
+<li>Open your project at <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">Supabase Dashboard</a>. Stay on the Free plan.</li>
+<li>This app's Supabase database is already configured. For a new project, run the SQL setup below in <strong>SQL Editor</strong>. It creates folders, boards, and image references with access limited to their owner.</li>
+<li>Use your project's browser-safe publishable key and URL in Note Settings or build configuration. Never use a service-role or secret key in the browser.</li>
+<li>In <strong>Authentication → URL Configuration</strong>, set Site URL and Redirect URLs to your Note website, including the repository path. For local testing, add <code>http://127.0.0.1:5173/</code>.</li>
+</ol>
+<button id="copy">Copy SQL setup</button><span class="status" id="copy-status" role="status"></span><pre id="sql">Loading setup…</pre>
+<h2 id="google-drive">2. Enable Google sign-in and Drive</h2>
+<p><strong>Configure this once for the app.</strong> Each person then chooses Continue with Google, authorizes app-created files, and saves images in their own private <strong>Note images</strong> folder. Supabase holds file IDs and searchable text. No public sharing links are created.</p>
+<ol>
+<li>Choose a project in <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud Console</a> and enable <strong>Google Drive API</strong>.</li>
+<li>Configure <strong>Google Auth Platform</strong> branding and audience. Add <code>openid</code>, <code>userinfo.email</code>, <code>userinfo.profile</code>, and <code>https://www.googleapis.com/auth/drive.file</code>. While in Testing, add each allowed Google account as a test user.</li>
+<li>Create an <strong>OAuth client → Web application</strong>. Authorized JavaScript origins: <code>https://augustof2022.github.io</code> and <code>http://127.0.0.1:5173</code>. Origins have no repository path.</li>
+<li>Authorized redirect URI: <code>https://wrkoxjlzdeiffdtgbyvq.supabase.co/auth/v1/callback</code>. If using another Supabase project, use that project's Google callback instead.</li>
+<li>In <strong>Supabase → Authentication → Sign In / Providers → Google</strong>, enable Google and enter the OAuth client ID and client secret <strong>there</strong>. Keep the secret out of Note settings, frontend environment variables, GitHub, and chat.</li>
+<li>Allow the Note site in Supabase's redirect URLs, for example <code>https://augustof2022.github.io/notes/</code> and the local URL above.</li>
+<li>In Note choose <strong>Continue with Google</strong>, then grant the Drive permission. New images automatically use that person's Drive. Use the same Google account on every device.</li>
+</ol>
+<div class="callout">Google may ask you to reconnect after reloading Note or when Drive access expires. Your local images remain saved while uploads wait. Note's Google tokens stay in memory; its saved Supabase session omits Google access and refresh tokens.</div>
+<p><small>For personal use, you may disable new Supabase signups after creating your account. If other people will use Note, keep signups enabled and configure the Google consent audience accordingly. Each account's database records remain private.</small></p>
+<h2>3. Publish on GitHub Pages</h2>
+<ol>
+<li>Put the app source in your GitHub repository. Keep personal notes, backups, and secret keys out of it.</li>
+<li>Open <strong>Repository Settings → Pages</strong> and choose <strong>GitHub Actions</strong>. The included workflow tests, builds, and publishes on a push to main.</li>
+<li>Optional browser-safe repository variables: <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>. Google credentials stay in Supabase's Google provider settings.</li>
+<li>Free GitHub Pages needs a public repository. A private repository needs a supported paid plan or a different static host.</li>
+</ol>
+<h2>Your device boards and backups</h2>
+<p>Device boards stay separate when you sign in. Use <strong>Settings → Cloud sync → Copy this device's boards into my account</strong> to migrate them. Email sign-in and Supabase image storage remain available as alternatives.</p>
+<p>Use <strong>Settings → Preferences & backup → Export backup</strong> before clearing browser data. Backups contain private content. Changing the image provider affects new uploads; existing references keep their original provider. Free OCR reads printed English screenshot text.</p>
+<script>let sql='';fetch('./setup.sql').then(r=>{if(!r.ok)throw new Error();return r.text()}).then(text=>{sql=text;document.getElementById('sql').textContent=text}).catch(()=>{document.getElementById('sql').textContent='Open supabase/schema.sql in the source repository.'});document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(sql);document.getElementById('copy-status').textContent='Copied'}catch{document.getElementById('copy-status').textContent='Select the script below and copy it.'}};</script>
+</body></html>

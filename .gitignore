@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+public/excalidraw/
+public/ocr/
+.local/
+*.log
+*.tsbuildinfo
