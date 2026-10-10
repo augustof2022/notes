@@ -18,7 +18,7 @@
 <tr><td>Google Drive API in Note Canvas</td><td class="done">Enabled</td></tr>
 <tr><td>Google app registration and four required scopes</td><td class="done">Complete</td></tr>
 <tr><td>Your Google account on the test-user list</td><td class="done">Added</td></tr>
-<tr><td>Google OAuth client</td><td class="pending">Finish step 4</td></tr>
+<tr><td>Google OAuth client named <strong>Web client 1</strong></td><td class="done">Created</td></tr>
 <tr><td>Google credentials in Supabase and first Google sign-in</td><td class="pending">Follow steps below</td></tr>
 </tbody></table>
 <p class="muted">This checklist records the initial setup. It does not inspect your account live. After completing the Google steps, use the test in step 6 to confirm everything works.</p>
@@ -52,6 +52,7 @@ https://www.googleapis.com/auth/userinfo.profile
 https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy scopes</button><span class="status" role="status"></span></div>
 <p><code>drive.file</code> allows Note to work with files it creates or that you explicitly give it access to. Note creates a private <strong>Note images</strong> folder automatically; you do not need to create or share it yourself. <a href="https://developers.google.com/workspace/drive/api/guides/api-specific-auth" target="_blank" rel="noreferrer">Google's Drive scope documentation</a>.</p>
 <h2>4. Create the Google OAuth client</h2>
+<p><strong>Web client 1</strong> has already been created in Note Canvas. Use that existing client. The steps and values below are for checking its configuration or setting up a replacement.</p>
 <ol>
 <li>Open <strong>Clients → Create client</strong>.</li>
 <li>Application type: <strong>Web application</strong>. Name: <strong>Note Web</strong>.</li>
@@ -67,7 +68,7 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <li>Open <a href="https://supabase.com/dashboard/project/wrkoxjlzdeiffdtgbyvq/auth/providers?provider=Google" target="_blank" rel="noreferrer">your Supabase Google provider</a>.</li>
 <li>Switch on <strong>Enable Sign in with Google</strong>.</li>
 <li>Replace the current Client IDs value with the generated OAuth <strong>Client ID</strong>. It ends in <code>.apps.googleusercontent.com</code>.</li>
-<li>Replace Client Secret (for OAuth) with the <strong>Client Secret from Google Cloud</strong>. Both must belong to the same Note Web client.</li>
+<li>Replace Client Secret (for OAuth) with the <strong>Client Secret from Google Cloud</strong>. Both must belong to the same OAuth client; use the existing Web client 1.</li>
 <li>Keep <strong>Skip nonce checks</strong> and <strong>Allow users without an email</strong> off. Click <strong>Save</strong>.</li>
 </ol>
 <div class="callout">Enter the generated ID and secret directly into Supabase yourself. A Google email address is not a Client ID. Keep the secret out of chat, Note settings, GitHub and frontend environment variables.</div>
