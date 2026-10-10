@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Cloud, CloudOff, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, X } from 'lucide-react';
 import type { Asset, Board, Folder, SearchMatch, Settings } from './types';
 import { recordKey } from './types';
-import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, seedLocal, storeSettings, touch, trashFolder } from './lib/db';
+import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, seedLocal, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
 import { getSupabase, validateCloudSettings } from './lib/supabase';
 import { importLocalWorkspace, syncWorkspace } from './lib/sync';
 import { disconnectDrive, driveConnected, googleSignInUrl, useGoogleDriveSession } from './lib/drive';
@@ -13,6 +13,7 @@ import { searchBoards } from './lib/search';
 import { BoardCanvas, type CanvasHandle } from './components/BoardCanvas';
 import { Modal } from './components/Modal';
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import { readOAuthReturn } from './lib/oauth-return';
 
 type Dialog = { kind: 'folder' | 'board' | 'rename' | 'move'; record?: Board | Folder } | { kind: 'settings' | 'auth' | 'help' | 'search' } | null;
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -24,6 +25,8 @@ function relativeDate(date: string) {
 function messageOf(error: unknown) { return error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : 'Something went wrong. Please try again.'; }
 
 export default function App() {
+  const [oauthReturn] = useState(() => readOAuthReturn(location.href));
+  const [authError, setAuthError] = useState(oauthReturn?.message || '');
   const [settings, setSettings] = useState<Settings>(getSettings);
   const [session, setSession] = useState<Session | null>(null);
   const scope = session?.user.id || 'local';
@@ -35,7 +38,7 @@ export default function App() {
   const [jumpId, setJumpId] = useState<string>();
   const [view, setView] = useState<'library' | 'trash'>('library');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialog, setDialog] = useState<Dialog>(oauthReturn ? { kind: 'auth' } : null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState('Saved on this device');
@@ -59,6 +62,10 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(''), 7000);
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; storeSettings(settings); }, [settings]);
+  useEffect(() => watchSettings(setSettings), []);
+  useEffect(() => {
+    if (oauthReturn) history.replaceState(history.state, '', oauthReturn.url);
+  }, [oauthReturn]);
   useEffect(() => {
     void seedLocal().catch(error => message(messageOf(error)));
     const event = (event: Event) => { event.preventDefault(); setInstallEvent(event as InstallEvent); };
@@ -302,7 +309,7 @@ export default function App() {
     {dialog?.kind === 'search' && <Modal title="Find anything" wide onClose={() => setDialog(null)}><div className="search-modal-input"><Search size={20} /><input autoFocus aria-label="Search notes and boards" placeholder="A word, an idea, a screenshot…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>Esc</kbd></div><div className="search-scope"><span>Search in</span><select aria-label="Search folder" value={searchFolderId || ''} onChange={event => setSearchFolderId(event.target.value || null)}><option value="">Entire workspace</option>{workspace.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(workspace.folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select><small>Includes all subfolders</small></div><div className="search-results">{!query.trim() ? <div className="search-empty"><Search size={26} /><p>Search board names, typed notes, and screenshot text.</p></div> : matches.length ? matches.map((match, index) => <SearchResult key={`${match.board.id}:${match.elementId || 'title'}:${index}`} match={match} folders={workspace.folders} onOpen={() => void openBoard(match.board, match.elementId)} />) : <div className="search-empty"><p>No matches in this folder.</p><small>Try fewer words or choose Entire workspace.</small></div>}</div></Modal>}
     {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Canvas shortcuts work when you aren’t editing text.</p></Modal>}
     {dialog?.kind === 'settings' && <SettingsDialog settings={settings} session={session} syncStatus={syncStatus} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); validateCloudSettings(next.supabaseUrl, next.supabaseKey); if (session && (next.supabaseUrl !== settings.supabaseUrl || next.supabaseKey !== settings.supabaseKey)) { await syncPromise.current; await client?.auth.signOut(); } setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (const asset of assets.filter(x => x.dataURL && x.ocrStatus !== 'done')) { await db.assets.update(asset.key, { ocrStatus: 'pending' }); queueOcr(asset); } message('Screenshot text recognition queued'); }} />}
-    {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} onGoogle={signInWithGoogle} onClose={() => setDialog(null)} onConfigure={() => setDialog({ kind: 'settings' })} onComplete={() => { setDialog(null); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
+    {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} initialError={authError} onGoogle={signInWithGoogle} onClose={() => { setDialog(null); setAuthError(''); }} onConfigure={() => { setAuthError(''); setDialog({ kind: 'settings' }); }} onComplete={() => { setDialog(null); setAuthError(''); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
   </div>;
 }
 
@@ -325,10 +332,10 @@ function MoveDialog({ record, folders, onClose, onMove }: { record: Board | Fold
 function SearchResult({ match, folders, onOpen }: { match: SearchMatch; folders: Folder[]; onOpen: () => void }) {
   return <button className="search-result" onClick={onOpen}><span className={`result-icon ${match.kind}`}>{match.kind === 'image' ? <Image size={18} /> : <StickyNote size={18} />}</span><span><strong>{match.board.name}</strong><small>{folderPath(folders, match.board.folderId).map(x => x.name).join(' / ') || 'Workspace'} · {match.kind === 'image' ? 'Screenshot text' : match.kind === 'title' ? 'Board name' : 'Typed note'}</small><p>{match.text.slice(0, 240)}</p></span><ArrowUpRight size={17} /></button>;
 }
-function AuthDialog({ configured, client, onGoogle, onClose, onConfigure, onComplete }: { configured: boolean; client: ReturnType<typeof getSupabase>; onGoogle: () => Promise<void>; onClose: () => void; onConfigure: () => void; onComplete: () => void }) {
+function AuthDialog({ configured, client, initialError, onGoogle, onClose, onConfigure, onComplete }: { configured: boolean; client: ReturnType<typeof getSupabase>; initialError: string; onGoogle: () => Promise<void>; onClose: () => void; onConfigure: () => void; onComplete: () => void }) {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
   const [signup, setSignup] = useState(false); const [useEmail, setUseEmail] = useState(false);
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(initialError); const [notice, setNotice] = useState('');
   function action(work: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
     void work().catch(error => setError(messageOf(error))).finally(() => setBusy(false));

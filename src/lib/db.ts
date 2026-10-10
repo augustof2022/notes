@@ -21,6 +21,14 @@ export function getSettings(): Settings {
   catch { return settingsDefaults; }
 }
 export function storeSettings(settings: Settings) { localStorage.setItem('note-settings', JSON.stringify(settings)); }
+export function watchSettings(onChange: (settings: Settings) => void) {
+  const changed = (event: StorageEvent) => {
+    if (event.storageArea !== localStorage || (event.key !== null && event.key !== 'note-settings')) return;
+    onChange(getSettings());
+  };
+  window.addEventListener('storage', changed);
+  return () => window.removeEventListener('storage', changed);
+}
 export const touch = () => ({ updatedAt: new Date().toISOString(), dirty: true });
 export async function newFolder(scope: string, name: string, parentId: string | null): Promise<Folder> {
   const id = crypto.randomUUID();

@@ -9,7 +9,7 @@
 </head>
 <body>
 <header><a href="./">← Back to Note</a><h1>Google login. Your own Drive.</h1><p>A step-by-step guide for the app owner. Complete this once; each person can then sign in with their Google account.</p></header>
-<div class="callout"><strong>The Note website and Supabase database are already ready.</strong> Your remaining setup is Google login and Drive permission. The tables in Supabase are the app's storage structure; your Note account is created when you first sign in through the website.</div>
+<div class="callout"><strong>Your Note setup is working.</strong> Google sign-in, board sync to Supabase, and a private image upload to your Google Drive were verified. Open Note with the same Google account on your other devices. The steps below document the setup for future reference.</div>
 <table aria-label="Setup checklist"><thead><tr><th>Setup</th><th>Status</th></tr></thead><tbody>
 <tr><td>GitHub Pages website</td><td class="done">Complete</td></tr>
 <tr><td>Supabase folders, boards, image metadata and ownership rules</td><td class="done">Complete</td></tr>
@@ -20,7 +20,7 @@
 <tr><td>Your Google account on the test-user list</td><td class="done">Added</td></tr>
 <tr><td>Google OAuth client named <strong>Web client 1</strong></td><td class="done">Created</td></tr>
 <tr><td>Google provider in Supabase</td><td class="done">Enabled; credentials saved</td></tr>
-<tr><td>First Google sign-in and Drive upload</td><td class="pending">Test in step 6</td></tr>
+<tr><td>First Google sign-in and Drive upload</td><td class="done">Verified with the Sync test board</td></tr>
 </tbody></table>
 <p class="muted">This checklist records the initial setup. It does not inspect your account live. After completing the Google steps, use the test in step 6 to confirm everything works.</p>
 <h2>1. Finish Google app registration</h2>
@@ -92,6 +92,7 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <tr><td>invalid_client</td><td>Use the generated OAuth Client ID and matching Client Secret.</td></tr>
 <tr><td>redirect_uri_mismatch</td><td>Google's Authorized redirect URI must exactly match the callback in step 4.</td></tr>
 <tr><td>Access denied while in Testing</td><td>Add the selected Google account under Audience → Test users.</td></tr>
+<tr><td>Google sign-in request expired</td><td>Choose Continue with Google in Note to start a fresh request. Finish the Google steps promptly; the expired request cannot be reused.</td></tr>
 <tr><td>Board text syncs but images wait</td><td>Check Drive API, drive.file, and Drive consent. Reconnect in Note's Images &amp; search settings.</td></tr>
 <tr><td>Google shows an unverified-app warning</td><td>Testing apps show a warning. Review the app and requested permissions yourself before deciding whether to continue. For production, review Google's verification requirements.</td></tr>
 </tbody></table>
