@@ -16,7 +16,9 @@
 <tr><td>Supabase site URL and production redirect allowlist</td><td class="done">Complete</td></tr>
 <tr><td>Google Cloud project named <strong>Note Canvas</strong></td><td class="done">Created</td></tr>
 <tr><td>Google Drive API in Note Canvas</td><td class="done">Enabled</td></tr>
-<tr><td>Google registration, test users, scopes and OAuth client</td><td class="pending">Follow steps below</td></tr>
+<tr><td>Google app registration and four required scopes</td><td class="done">Complete</td></tr>
+<tr><td>Your Google account on the test-user list</td><td class="done">Added</td></tr>
+<tr><td>Google OAuth client</td><td class="pending">Finish step 4</td></tr>
 <tr><td>Google credentials in Supabase and first Google sign-in</td><td class="pending">Follow steps below</td></tr>
 </tbody></table>
 <p class="muted">This checklist records the initial setup. It does not inspect your account live. After completing the Google steps, use the test in step 6 to confirm everything works.</p>
@@ -24,11 +26,12 @@
 <ol>
 <li>Open <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">Google Auth Platform</a>. Select the <strong>Note Canvas</strong> project using the project selector at the top.</li>
 <li>If the setup wizard is still open at <strong>Finish</strong>, review Google's User Data Policy, tick the agreement if you accept it, then click <strong>Continue → Create</strong>.</li>
-<li>If you need to start again, click <strong>Get started</strong>. Enter app name <strong>Note</strong>, choose your Google email as User support email, and click <strong>Next</strong>.</li>
+<li>If you already see Overview, Branding, Audience and Clients in the sidebar, registration is complete. Skip to step 2. If registration has not started, click <strong>Get started</strong>. Enter app name <strong>Note</strong>, choose your Google email as User support email, and click <strong>Next</strong>.</li>
 <li>Choose <strong>External</strong> for Audience, click Next, enter your email for Contact Information, then Next. Review the agreement yourself and finish with Continue → Create.</li>
 </ol>
 <p>The app starts in Testing. That is enough to get your own account working. <a href="https://developers.google.com/workspace/guides/configure-oauth-consent" target="_blank" rel="noreferrer">Google's registration instructions</a>.</p>
 <h2>2. Add the Google accounts that may test Note</h2>
+<p>Your current Google account has already been added. Use these steps if you want another Google account to test Note.</p>
 <ol>
 <li>In Google Auth Platform, open <strong>Audience</strong>.</li>
 <li>Leave Publishing status as <strong>Testing</strong> for your first setup.</li>
@@ -37,6 +40,7 @@
 </ol>
 <p>While in Testing, each Google account that uses Note must be on this list. You can use one account on multiple devices. Other people do not each need a Cloud project.</p>
 <h2>3. Add the four required permissions</h2>
+<p>The four scopes are already saved in Note Canvas. These instructions let you check them or configure a replacement project.</p>
 <ol>
 <li>Open <strong>Data Access → Add or remove scopes</strong>.</li>
 <li>Select the four scopes below. If one is missing, add its exact value under <strong>Manually add scopes</strong>.</li>
