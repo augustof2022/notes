@@ -44,12 +44,22 @@ export function installLockedPan(root: HTMLElement, api: ExcalidrawImperativeAPI
     const { scrollX, scrollY, zoom } = api.getAppState();
     api.updateScene({ appState: { scrollX: scrollX + delta.x / zoom.value, scrollY: scrollY + delta.y / zoom.value }, captureUpdate: CaptureUpdateAction.NEVER });
   };
-  let frame = 0, movement: Point = { x: 0, y: 0 };
+  let frame = 0, movement: Point = { x: 0, y: 0 }, applied: Point = { x: 0, y: 0 };
+  let touchViewport: { scrollX: number; scrollY: number; zoom: number } | null = null;
+  const clearMovement = () => { movement = { x: 0, y: 0 }; applied = { x: 0, y: 0 }; touchViewport = null; };
   const flushMovement = () => {
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
-    if (locked()) pan(movement);
-    movement = { x: 0, y: 0 };
+    if (!locked() || (applied.x === movement.x && applied.y === movement.y)) return;
+    // Read the gesture origin after the editor has finished the initial
+    // one-finger interaction. Later frames use this origin, not potentially
+    // stale getAppState() values while React is still rendering a prior frame.
+    if (!touchViewport) {
+      const { scrollX, scrollY, zoom } = api.getAppState();
+      touchViewport = { scrollX, scrollY, zoom: zoom.value };
+    }
+    api.updateScene({ appState: { scrollX: touchViewport.scrollX + movement.x / touchViewport.zoom, scrollY: touchViewport.scrollY + movement.y / touchViewport.zoom }, captureUpdate: CaptureUpdateAction.NEVER });
+    applied = { ...movement };
   };
   const queueMovement = (delta: Point) => {
     movement.x += delta.x; movement.y += delta.y;
@@ -63,16 +73,21 @@ export function installLockedPan(root: HTMLElement, api: ExcalidrawImperativeAPI
     if (event.pointerType !== 'touch' || !locked() || !canvasTarget(event.target)) return;
     // Let the editor observe downs/ups so it cancels a provisional pen stroke
     // and cleans up its own pointer capture. Only its movement is intercepted.
+    const wasActive = touch.active;
     touch.down(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!wasActive && touch.active) clearMovement();
   };
   const move = (event: PointerEvent) => {
-    if (!locked()) { touch.reset(); flushMovement(); return; }
-    if (event.pointerType !== 'touch' || !touch.active) return;
-    stop(event);
+    if (!locked()) { touch.reset(); flushMovement(); clearMovement(); return; }
+    if (event.pointerType !== 'touch') return;
+    // Keep the first finger's coordinates current while normal drawing or
+    // panning is still allowed. A second finger must start at today's position.
     const delta = touch.move(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!touch.active) return;
+    stop(event);
     if (delta) queueMovement(delta);
   };
-  const up = (event: PointerEvent) => { flushMovement(); touch.up(event.pointerId); };
+  const up = (event: PointerEvent) => { flushMovement(); touch.up(event.pointerId); if (!touch.active) clearMovement(); };
   const gesture = (event: Event) => { if (locked() && canvasTarget(event.target)) stop(event); };
   const click = (event: MouseEvent) => {
     if (!locked() || !(event.target instanceof Element)) return;
@@ -82,7 +97,7 @@ export function installLockedPan(root: HTMLElement, api: ExcalidrawImperativeAPI
   const key = (event: KeyboardEvent) => {
     if (locked() && (event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key) && !(event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]'))) stop(event);
   };
-  const reset = () => { touch.reset(); flushMovement(); };
+  const reset = () => { flushMovement(); touch.reset(); clearMovement(); };
   root.addEventListener('wheel', wheel, { capture: true, passive: false });
   root.addEventListener('pointerdown', down, true);
   root.addEventListener('click', click, true);

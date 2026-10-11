@@ -73,3 +73,44 @@ it('batches touch pan per frame and blocks native movement until all fingers lif
   pointer(win, 'pointerup', 1, 150); pointer(win, 'pointermove', 1, 160); expect(native).toHaveBeenCalledOnce();
   cleanup();
 });
+it('starts two-finger panning from the first finger latest position after writing or dragging', () => {
+  const root = new Surface(), win = new EventTarget(); vi.stubGlobal('Element', Surface); vi.stubGlobal('window', win);
+  let nextFrame: FrameRequestCallback | null = null;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { nextFrame = callback; return 1; });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const state = { scrollX: 40, scrollY: 60, zoom: { value: 2 } }, update = vi.fn(({ appState }) => Object.assign(state, appState));
+  const cleanup = installLockedPan(root as unknown as HTMLElement, { getAppState: () => state, updateScene: update } as unknown as ExcalidrawImperativeAPI, () => true);
+  const native = vi.fn(); win.addEventListener('pointermove', native);
+  const pointer = (target: EventTarget, type: string, id: number, x: number, y: number) => target.dispatchEvent(input(type, { pointerType: 'touch', pointerId: id, clientX: x, clientY: y }));
+  pointer(root, 'pointerdown', 1, 100, 200);
+  pointer(win, 'pointermove', 1, 500, 600); // Ordinary drawing/panning before adding a second finger.
+  expect(native).toHaveBeenCalledOnce(); expect(update).not.toHaveBeenCalled();
+  pointer(root, 'pointerdown', 2, 600, 600);
+  pointer(win, 'pointermove', 1, 520, 620); pointer(win, 'pointermove', 2, 620, 620);
+  (nextFrame as FrameRequestCallback | null)?.(0);
+  expect(state).toEqual({ scrollX: 50, scrollY: 70, zoom: { value: 2 } });
+  expect(native).toHaveBeenCalledOnce(); cleanup();
+});
+it('keeps touch pan continuous when getAppState still returns the previous rendered viewport', () => {
+  const root = new Surface(), win = new EventTarget(); vi.stubGlobal('Element', Surface); vi.stubGlobal('window', win);
+  let nextFrame: FrameRequestCallback | null = null;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { nextFrame = callback; return 1; });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const staleState = { scrollX: 40, scrollY: 60, zoom: { value: 2 } }, update = vi.fn();
+  const cleanup = installLockedPan(root as unknown as HTMLElement, { getAppState: () => staleState, updateScene: update } as unknown as ExcalidrawImperativeAPI, () => true);
+  const pointer = (target: EventTarget, type: string, id: number, x: number, y: number) => target.dispatchEvent(input(type, { pointerType: 'touch', pointerId: id, clientX: x, clientY: y }));
+  pointer(root, 'pointerdown', 1, 100, 200); pointer(root, 'pointerdown', 2, 200, 200);
+  pointer(win, 'pointermove', 1, 120, 220); pointer(win, 'pointermove', 2, 220, 220);
+  (nextFrame as FrameRequestCallback | null)?.(0);
+  expect(update.mock.lastCall?.[0].appState).toEqual({ scrollX: 50, scrollY: 70 });
+  pointer(win, 'pointermove', 1, 140, 240); pointer(win, 'pointermove', 2, 240, 240);
+  (nextFrame as FrameRequestCallback | null)?.(0);
+  expect(update.mock.lastCall?.[0].appState).toEqual({ scrollX: 60, scrollY: 80 });
+  // Lifting and rejoining a finger rebases its center without a viewport jump.
+  pointer(win, 'pointerup', 2, 240, 240); pointer(win, 'pointermove', 1, 500, 600);
+  pointer(root, 'pointerdown', 3, 600, 600);
+  pointer(win, 'pointermove', 1, 520, 620); pointer(win, 'pointermove', 3, 620, 620);
+  (nextFrame as FrameRequestCallback | null)?.(0);
+  expect(update.mock.lastCall?.[0].appState).toEqual({ scrollX: 70, scrollY: 90 });
+  cleanup();
+});
