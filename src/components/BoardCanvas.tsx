@@ -7,7 +7,8 @@ import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText } from 'lucide
 import type { Board, Settings, ViewLock } from '../types';
 import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
-import { PenWidthControl } from './PenWidthControl';
+import { PenWidthPanel } from './PenWidthPanel';
+import { installLockedPan } from '../lib/locked-pan';
 import { db, touch } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
@@ -31,6 +32,7 @@ function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<A
 }
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
   const viewLock = useRef<ViewLock | null>(board.appState.noteViewLock || null);
@@ -45,6 +47,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saving = useRef(Promise.resolve());
   const booted = useRef(false);
+  useEffect(() => {
+    if (canvasRoot && api) return installLockedPan(canvasRoot, api, () => !!viewLock.current);
+  }, [canvasRoot, api]);
   const latest = useRef({ settings, onSaved, onMessage }); latest.current = { settings, onSaved, onMessage };
   async function loadFiles() {
     if (client) {
@@ -174,7 +179,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState } });
     void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
   }, [board.remoteRevision]);
-  return <div className="board-canvas">
+  return <div className="board-canvas" ref={setCanvasRoot}>
     {!api && <div className="canvas-loading"><Loader2 className="spinning" size={24} /> Opening your board…</div>}
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
@@ -184,8 +189,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
     }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</button>
       <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button>
-      {showPenWidth && <PenWidthControl value={widthValue} onChange={changePenWidth} />}
       </div>}
+    <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;
 });

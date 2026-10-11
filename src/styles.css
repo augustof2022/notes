@@ -19,3 +19,9 @@
 @media(max-width:760px){.canvas-tools{max-width:calc(100% - 40px)}.pen-width-control{width:100%;justify-content:center;border-top:1px solid var(--line);padding:6px 3px 2px}.pen-width-control input[type="range"]{width:80px}.pen-width-control input[type="number"]{width:53px}}
 .board-canvas .excalidraw .scroll-back-to-content{bottom:90px}
 @media(max-width:760px){.board-canvas .excalidraw .scroll-back-to-content{bottom:200px}}
+.board-canvas .excalidraw .note-pen-width>.buttonList{display:none}
+.note-pen-width-slot .pen-width-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:2px 0;border:0;width:100%}
+.note-pen-width-slot .pen-width-control>span{display:none}
+.note-pen-width-slot .pen-width-control input[type="range"]{grid-column:1/-1;width:100%;margin:6px 0}
+.note-pen-width-slot .pen-width-control input[type="number"]{width:100%;min-width:0}
+.note-pen-width-slot .pen-width-control button{font-size:11px;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink)}

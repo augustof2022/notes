@@ -11,8 +11,8 @@ A browser app for infinite canvas notes, with nested folders and screenshot past
 - Local autosave in IndexedDB, partitioned by account, plus Supabase sync when configured and signed in.
 - Images stored in private Supabase Storage or a private Google Drive “Note images” folder. Supabase stores Drive file IDs and OCR text; image bytes are not embedded in cloud board JSON.
 - Free local printed-text OCR with bundled Tesseract.js workers, WASM, and English language data. Pasted and downloaded images are indexed automatically; Read text lets you retry.
-- Numeric pen width and slider support 0.5–12 in steps of 0.5. New boards default to 1 for writing, with a Default reset button. Width applies to new strokes and any selected pen strokes.
-- Lock zoom holds only the zoom percentage while allowing pan, drawing, selection, and search navigation. It is saved per board; older view locks now behave as zoom locks.
+- The pen stroke-width panel replaces the three presets with a slider and numeric value, supporting 0.5–12 in steps of 0.5. New boards default to 1 for writing, with a Default reset button. Width applies to new strokes and any selected pen strokes.
+- Lock zoom holds only the zoom percentage while allowing pan, drawing, selection, and search navigation. Two-finger movement pans by the fingers' center at the current scale; Ctrl/Cmd + scroll pans instead of zooming. Gesture movement is intercepted before the editor can shift the zoom anchor, and batched per frame. It is saved per board; older view locks now behave as zoom locks.
 - Read text → Read handwriting groups selected pen strokes (or all handwriting) into lines. Recognize handwriting runs quantized TrOCR locally in a worker; review/edit the words and choose Save searchable text. The first use downloads about 90 MB from Hugging Face; model files use the browser cache. No board images are sent to the model host or a paid API. You can enter the searchable words manually without downloading the model.
 - Installable PWA, light/dark appearance, PNG export, and portable workspace backups including images.
 - Revision checks preserve a conflict copy when two devices edit the same item.
