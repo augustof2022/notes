@@ -4,6 +4,7 @@ import { recordKey } from '../types';
 import { db, folderPath, touch } from './db';
 import { blobToDataURL, dataURLToBlob } from './assets';
 import { downloadDriveImage, uploadDriveImage } from './drive';
+import { pendingImageMessage, syncErrorMessage } from './sync-status';
 
 type CloudRow = Record<string, any>;
 function folderFromCloud(row: CloudRow, scope: string): Folder {
@@ -40,11 +41,13 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
   if (!navigator.onLine) { report('Offline · saved on this device'); return; }
   const dirtyAssets = await db.assets.where('scope').equals(scope).filter(x => x.dirty).toArray();
   let pendingImages = false;
+  const failedImages = new Set<string>();
+  const imageErrors: string[] = [];
   for (const asset of dirtyAssets) {
     try {
       let storage = asset.storage; let remotePath = asset.remotePath;
       if (!remotePath) {
-        if (!asset.dataURL) continue;
+        if (!asset.dataURL) throw new Error('Image file is missing here. Open Note on the device where you added it, then retry uploads.');
         const blob = await dataURLToBlob(asset.dataURL);
         storage = settings.imageStore;
         if (storage === 'drive') remotePath = await uploadDriveImage(asset.id, scope, blob);
@@ -60,11 +63,14 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
       if (error) throw error;
       await db.transaction('rw', db.assets, async () => {
         const current = await db.assets.get(asset.key);
-        if (current?.ocrText === asset.ocrText && current.ocrStatus === asset.ocrStatus) await db.assets.update(asset.key, { dirty: false });
+        if (current?.ocrText === asset.ocrText && current.ocrStatus === asset.ocrStatus) await db.assets.update(asset.key, { dirty: false, syncError: undefined });
       });
     } catch (error) {
       pendingImages = true;
-      report(error instanceof Error ? error.message : 'Image sync is pending. Your local copy is saved.');
+      failedImages.add(asset.id);
+      const reason = syncErrorMessage(error); imageErrors.push(reason);
+      await db.assets.update(asset.key, { syncError: reason });
+      report(reason);
     }
   }
   const folders = await db.folders.where('scope').equals(scope).toArray();
@@ -76,7 +82,13 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
     // Other devices need both the uploaded file and its saved metadata.
     if (isBoard) {
       const images = await db.assets.bulkGet(record.assetIds.map(id => recordKey(scope, id)));
-      if (images.some(x => !x?.remotePath || x.dirty)) { pendingImages = true; continue; }
+      const waiting = record.assetIds.filter((_, index) => !images[index]?.remotePath || images[index]?.dirty);
+      if (waiting.length) {
+        pendingImages = true;
+        for (const id of waiting) failedImages.add(id);
+        if (images.some(x => !x)) imageErrors.push('Image file is missing here. Open Note on the device where you added it, then retry uploads.');
+        continue;
+      }
     }
     const payload = isBoard
       ? { id: record.id, name: record.name, folder_id: record.folderId, elements: record.elements, app_state: record.appState, asset_ids: record.assetIds, deleted: record.deleted }
@@ -115,7 +127,7 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
       if (!existing?.dirty) await db.assets.put({ key: recordKey(scope, row.id), id: row.id, scope, dataURL: existing?.dataURL, mimeType: row.mime_type, created: row.created_ms, storage: row.storage, remotePath: row.remote_path, ocrText: row.ocr_text || '', ocrStatus: row.ocr_status || 'done', ocrVersion: existing?.ocrVersion, dirty: false });
     }
   });
-  report(conflicts ? `Saved a conflict copy of ${conflicts} item${conflicts === 1 ? '' : 's'} · sync again to upload it` : pendingImages ? 'Boards saved locally · some images are waiting to sync' : 'Everything is synced');
+  report(pendingImages ? pendingImageMessage(failedImages.size, imageErrors, conflicts) : conflicts ? `Saved a conflict copy of ${conflicts} item${conflicts === 1 ? '' : 's'} · sync again to upload it` : 'Everything is synced');
 }
 export async function importLocalWorkspace(scope: string) {
   const folders = await db.folders.where('scope').equals('local').toArray();

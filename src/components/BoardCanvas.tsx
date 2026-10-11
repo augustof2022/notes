@@ -5,8 +5,9 @@ import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, Ex
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText } from 'lucide-react';
 import type { Board, Settings, ViewLock } from '../types';
-import { constantInkUpdates, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
+import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
+import { PenWidthControl } from './PenWidthControl';
 import { db, touch } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
@@ -36,6 +37,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const previousTool = useRef<string>('selection');
   const correcting = useRef(false);
   const [reading, setReading] = useState(false);
+  const [showPenWidth, setShowPenWidth] = useState(false);
+  const [widthValue, setWidthValue] = useState(board.appState.currentItemStrokeWidth || DEFAULT_PEN_WIDTH);
   const initialSignature = useRef(sceneSignature(board.elements, board.appState));
   const lastSignature = useRef(initialSignature.current);
   const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Board['appState']; files: BinaryFiles } | null>(null);
@@ -55,7 +58,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     }
     return localSceneFiles(board.scope, board.assetIds);
   }
-  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { ...board.appState, theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
+  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
   async function flush() {
     if (timer.current) clearTimeout(timer.current);
     const snapshot = pending.current; pending.current = null;
@@ -72,6 +75,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   }
   function changed(elements: readonly ExcalidrawElement[], state: AppState, files: BinaryFiles) {
     if (correcting.current) return;
+    const selectedPen = elements.find(x => x.type === 'freedraw' && !x.isDeleted && state.selectedElementIds[x.id]);
+    setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
+    setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
     let repaired = false;
     for (const element of elements) {
       const updates = constantInkUpdates(element);
@@ -100,8 +106,17 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const element = api.getSceneElements().find(x => x.id === elementId);
     if (!element) return;
     api.updateScene({ appState: { selectedElementIds: { [elementId]: true } } });
-    if (viewLock.current) onMessage('View is locked. Unlock it to move to this search result.');
-    else api.scrollToContent(element, { fitToContent: true, animate: true, maxZoom: 1.4 });
+    api.scrollToContent(element, { fitToContent: !viewLock.current, animate: !viewLock.current, maxZoom: 1.4 });
+  }
+  function changePenWidth(value: number) {
+    if (!api) return;
+    const width = penWidth(value), state = api.getAppState();
+    const elements = api.getSceneElementsIncludingDeleted();
+    for (const element of elements) if (element.type === 'freedraw' && !element.isDeleted && state.selectedElementIds[element.id]) {
+      mutateElement(element, { strokeWidth: width, width: element.width }, false);
+    }
+    setWidthValue(width);
+    api.updateScene({ elements, appState: { currentItemStrokeWidth: width }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo,
     reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
@@ -165,10 +180,12 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
     {api && <div className="canvas-tools"><button aria-pressed={viewLocked} onClick={() => {
-      const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom, scrollX: state.scrollX, scrollY: state.scrollY };
+      const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
       setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
-    }}>{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock view' : 'Lock view'}</button>
-      <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button></div>}
+    }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</button>
+      <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button>
+      {showPenWidth && <PenWidthControl value={widthValue} onChange={changePenWidth} />}
+      </div>}
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;
 });

@@ -8,9 +8,12 @@ export function constantInkUpdates(element: ExcalidrawElement) {
   // Fixed pressure also disables the editor's speed-based simulated pressure.
   return { simulatePressure: false, pressures: element.points.map(() => 0.5), width: element.width };
 }
-export function viewLockCorrection(state: Pick<AppState, 'zoom' | 'scrollX' | 'scrollY'>, lock: ViewLock | null) {
-  return lock && (state.zoom.value !== lock.zoom.value || state.scrollX !== lock.scrollX || state.scrollY !== lock.scrollY) ? lock : null;
+export function viewLockCorrection(state: Pick<AppState, 'zoom'>, lock: ViewLock | null) {
+  // Older boards include scroll coordinates in their lock; deliberately ignore them.
+  return lock && state.zoom.value !== lock.zoom.value ? { zoom: lock.zoom } : null;
 }
+export const DEFAULT_PEN_WIDTH = 1;
+export function penWidth(value: number) { return Number.isFinite(value) ? Math.round(Math.min(12, Math.max(0.5, value)) * 2) / 2 : DEFAULT_PEN_WIDTH; }
 export function stickyTextTool(tool: AppState['activeTool'], previousType: string) {
   if (tool.type === 'text' && !tool.locked) return { ...tool, locked: true };
   if (previousType === 'text' && tool.type !== 'text' && tool.locked) return { ...tool, locked: false };

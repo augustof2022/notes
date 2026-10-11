@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { Asset, Board, Folder, Settings } from '../types';
 import { recordKey } from '../types';
 import { appConfig } from '../config';
+import { DEFAULT_PEN_WIDTH } from './canvas-behavior';
 
 class NoteDB extends Dexie {
   folders!: Table<Folder, string>; boards!: Table<Board, string>; assets!: Table<Asset, string>;
@@ -37,7 +38,7 @@ export async function newFolder(scope: string, name: string, parentId: string | 
 }
 export async function newBoard(scope: string, name: string, folderId: string | null): Promise<Board> {
   const id = crypto.randomUUID();
-  const board: Board = { key: recordKey(scope, id), id, scope, name, folderId, elements: [], appState: { viewBackgroundColor: '#faf9f6', currentItemFontFamily: 2, currentItemRoughness: 0 }, assetIds: [], preview: null, ...touch(), deleted: false, remoteRevision: 0 };
+  const board: Board = { key: recordKey(scope, id), id, scope, name, folderId, elements: [], appState: { viewBackgroundColor: '#faf9f6', currentItemFontFamily: 2, currentItemRoughness: 0, currentItemStrokeWidth: DEFAULT_PEN_WIDTH }, assetIds: [], preview: null, ...touch(), deleted: false, remoteRevision: 0 };
   await db.boards.add(board); return board;
 }
 export async function loadWorkspace(scope: string) {

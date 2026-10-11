@@ -11,13 +11,14 @@ export interface Board extends RecordBase {
   folderId: string | null; elements: readonly ExcalidrawElement[];
   appState: Partial<AppState> & { noteViewLock?: ViewLock | null }; assetIds: string[]; preview: string | null;
 }
-export type ViewLock = Pick<AppState, 'zoom' | 'scrollX' | 'scrollY'>;
+export type ViewLock = Pick<AppState, 'zoom'>;
 export interface Asset {
   key: string; id: string; scope: string; dataURL?: string;
   mimeType: string; created: number; storage: ImageStore | null;
   remotePath: string | null; ocrText: string; ocrStatus: 'pending' | 'done' | 'failed';
   dirty: boolean;
   ocrVersion?: number;
+  syncError?: string;
 }
 export interface Settings {
   supabaseUrl: string; supabaseKey: string;

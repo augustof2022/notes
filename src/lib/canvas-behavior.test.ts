@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExcalidrawFreeDrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState } from '@excalidraw/excalidraw/types';
-import { constantInkUpdates, stickyTextTool, viewLockCorrection } from './canvas-behavior';
+import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLockCorrection } from './canvas-behavior';
 import { handwritingLines, handwritingSignature, indexedHandwriting } from './handwriting-index';
 import { searchBoards } from './search';
 import type { Board, Folder, ViewLock } from '../types';
@@ -16,11 +16,17 @@ describe('note canvas behavior', () => {
     expect(constantInkUpdates(result)).toBeNull();
     expect(constantInkUpdates({ ...pen, simulatePressure: true, pressures: [] })?.pressures).toEqual([0.5, 0.5]);
   });
-  it('holds both zoom and position and permits view changes when unlocked', () => {
-    const lock = { zoom: { value: 1 }, scrollX: 4, scrollY: 8 } as ViewLock;
-    expect(viewLockCorrection({ ...lock, scrollX: 100 }, lock)).toBe(lock);
-    expect(viewLockCorrection({ ...lock, zoom: { value: 2 } } as ViewLock, lock)).toBe(lock);
+  it('locks only zoom and allows pan, including locks saved by the older app', () => {
+    const lock = { zoom: { value: 1 as ViewLock['zoom']['value'] }, scrollX: 4, scrollY: 8 };
+    const moved = { ...lock, scrollX: 100 };
+    expect(viewLockCorrection(moved, lock)).toBeNull();
+    expect(viewLockCorrection({ zoom: { value: 2 } } as ViewLock, lock)).toEqual({ zoom: lock.zoom });
+    expect({ ...moved, ...viewLockCorrection({ zoom: { value: 2 } } as ViewLock, lock) }.scrollX).toBe(100);
     expect(viewLockCorrection(lock, lock)).toBeNull(); expect(viewLockCorrection(lock, null)).toBeNull();
+  });
+  it('accepts fractional widths and clamps the supported range with a writing default', () => {
+    expect(penWidth(2.5)).toBe(2.5); expect(penWidth(0)).toBe(0.5); expect(penWidth(100)).toBe(12);
+    expect(penWidth(NaN)).toBe(DEFAULT_PEN_WIDTH); expect(DEFAULT_PEN_WIDTH).toBe(1);
   });
   it('locks text mode, then releases the editor tool lock when choosing another tool', () => {
     const text = { type: 'text', locked: false } as AppState['activeTool'];
