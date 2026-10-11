@@ -9,18 +9,20 @@ export interface RecordBase {
 export interface Folder extends RecordBase { parentId: string | null; color: string }
 export interface Board extends RecordBase {
   folderId: string | null; elements: readonly ExcalidrawElement[];
-  appState: Partial<AppState>; assetIds: string[]; preview: string | null;
+  appState: Partial<AppState> & { noteViewLock?: ViewLock | null }; assetIds: string[]; preview: string | null;
 }
+export type ViewLock = Pick<AppState, 'zoom' | 'scrollX' | 'scrollY'>;
 export interface Asset {
   key: string; id: string; scope: string; dataURL?: string;
   mimeType: string; created: number; storage: ImageStore | null;
   remotePath: string | null; ocrText: string; ocrStatus: 'pending' | 'done' | 'failed';
   dirty: boolean;
+  ocrVersion?: number;
 }
 export interface Settings {
   supabaseUrl: string; supabaseKey: string;
   imageStore: ImageStore; ocrEnabled: boolean; theme: 'light' | 'dark';
 }
-export interface SearchMatch { board: Board; elementId?: string; text: string; kind: 'title' | 'text' | 'image' }
+export interface SearchMatch { board: Board; elementId?: string; text: string; kind: 'title' | 'text' | 'image' | 'handwriting' }
 export type SceneFiles = BinaryFiles;
 export const recordKey = (scope: string, id: string) => `${scope}:${id}`;

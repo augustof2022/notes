@@ -1,5 +1,6 @@
 import type { Asset, Board, Folder, SearchMatch } from '../types';
 import { descendantFolderIds } from './db';
+import { indexedHandwriting } from './handwriting-index';
 
 export function searchBoards(boards: Board[], folders: Folder[], assets: Asset[], query: string, folderId: string | null): SearchMatch[] {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -14,6 +15,10 @@ export function searchBoards(boards: Board[], folders: Folder[], assets: Asset[]
     for (const element of board.elements) {
       if (element.isDeleted) continue;
       if (element.type === 'text' && match(element.text)) result.push({ board, elementId: element.id, text: element.text, kind: 'text' });
+      if (element.type === 'freedraw') {
+        const text = indexedHandwriting(element, board.elements);
+        if (text && match(text)) result.push({ board, elementId: element.id, text, kind: 'handwriting' });
+      }
       if (element.type === 'image' && element.fileId) {
         const text = images.get(element.fileId)?.ocrText || '';
         if (text && match(text)) result.push({ board, elementId: element.id, text, kind: 'image' });

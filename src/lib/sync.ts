@@ -112,7 +112,7 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
     }
     for (const row of cloudAssets) {
       const existing = await db.assets.get(recordKey(scope, row.id));
-      if (!existing?.dirty) await db.assets.put({ key: recordKey(scope, row.id), id: row.id, scope, dataURL: existing?.dataURL, mimeType: row.mime_type, created: row.created_ms, storage: row.storage, remotePath: row.remote_path, ocrText: row.ocr_text || '', ocrStatus: row.ocr_status || 'done', dirty: false });
+      if (!existing?.dirty) await db.assets.put({ key: recordKey(scope, row.id), id: row.id, scope, dataURL: existing?.dataURL, mimeType: row.mime_type, created: row.created_ms, storage: row.storage, remotePath: row.remote_path, ocrText: row.ocr_text || '', ocrStatus: row.ocr_status || 'done', ocrVersion: existing?.ocrVersion, dirty: false });
     }
   });
   report(conflicts ? `Saved a conflict copy of ${conflicts} item${conflicts === 1 ? '' : 's'} · sync again to upload it` : pendingImages ? 'Boards saved locally · some images are waiting to sync' : 'Everything is synced');

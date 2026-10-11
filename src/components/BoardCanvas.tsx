@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, exportToBlob } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, exportToBlob, mutateElement } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ImagePlus, Loader2 } from 'lucide-react';
-import type { Board, Settings } from '../types';
+import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText } from 'lucide-react';
+import type { Board, Settings, ViewLock } from '../types';
+import { constantInkUpdates, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
+import { ReadTextDialog } from './ReadTextDialog';
 import { db, touch } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
@@ -17,9 +19,10 @@ export interface CanvasHandle {
   jumpTo: (elementId: string) => void;
   reloadImages: () => Promise<void>;
 }
-function cleanAppState(state: AppState): Partial<AppState> {
+function cleanAppState(state: AppState): Board['appState'] {
   return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
     currentItemFontFamily: state.currentItemFontFamily, currentItemRoughness: state.currentItemRoughness,
+    currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemFontSize: state.currentItemFontSize,
     gridSize: state.gridSize, gridStep: state.gridStep, gridModeEnabled: state.gridModeEnabled };
 }
 function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<AppState>) {
@@ -28,9 +31,14 @@ function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<A
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
+  const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
+  const viewLock = useRef<ViewLock | null>(board.appState.noteViewLock || null);
+  const previousTool = useRef<string>('selection');
+  const correcting = useRef(false);
+  const [reading, setReading] = useState(false);
   const initialSignature = useRef(sceneSignature(board.elements, board.appState));
   const lastSignature = useRef(initialSignature.current);
-  const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Partial<AppState>; files: BinaryFiles } | null>(null);
+  const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Board['appState']; files: BinaryFiles } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saving = useRef(Promise.resolve());
   const booted = useRef(false);
@@ -63,9 +71,23 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     await saving.current;
   }
   function changed(elements: readonly ExcalidrawElement[], state: AppState, files: BinaryFiles) {
-    const clean = cleanAppState(state); const signature = sceneSignature(elements, clean);
+    if (correcting.current) return;
+    let repaired = false;
+    for (const element of elements) {
+      const updates = constantInkUpdates(element);
+      if (updates) { mutateElement(element, updates, false); repaired = true; }
+    }
+    const correction = viewLockCorrection(state, viewLock.current);
+    const tool = stickyTextTool(state.activeTool, previousTool.current);
+    previousTool.current = state.activeTool.type;
+    correcting.current = true;
+    try {
+      if (api && (repaired || correction)) api.updateScene({ elements, ...(correction ? { appState: correction } : {}), captureUpdate: CaptureUpdateAction.NEVER });
+      if (api && tool) api.setActiveTool(tool);
+    } finally { correcting.current = false; }
+    const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean);
     setEmpty(!elements.some(x => !x.isDeleted));
-    if (!booted.current) { booted.current = true; lastSignature.current = signature; return; }
+    if (!booted.current) { booted.current = true; if (!repaired) { lastSignature.current = signature; return; } }
     if (lastSignature.current === signature) return;
     lastSignature.current = signature;
     // Copy now: canvas file maps and app state can mutate during a delayed save.
@@ -78,7 +100,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const element = api.getSceneElements().find(x => x.id === elementId);
     if (!element) return;
     api.updateScene({ appState: { selectedElementIds: { [elementId]: true } } });
-    api.scrollToContent(element, { fitToContent: true, animate: true, maxZoom: 1.4 });
+    if (viewLock.current) onMessage('View is locked. Unlock it to move to this search result.');
+    else api.scrollToContent(element, { fitToContent: true, animate: true, maxZoom: 1.4 });
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo,
     reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
@@ -132,6 +155,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const signature = sceneSignature(board.elements, board.appState);
     if (signature === lastSignature.current) return;
     lastSignature.current = signature;
+    viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
     api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState } });
     void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
   }, [board.remoteRevision]);
@@ -140,6 +164,11 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
-    <div className="canvas-caption">Infinite room for your ideas</div>
+    {api && <div className="canvas-tools"><button aria-pressed={viewLocked} onClick={() => {
+      const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom, scrollX: state.scrollX, scrollY: state.scrollY };
+      setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
+    }}>{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock view' : 'Lock view'}</button>
+      <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button></div>}
+    {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;
 });

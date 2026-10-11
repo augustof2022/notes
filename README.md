@@ -4,13 +4,15 @@ A browser app for infinite canvas notes, with nested folders and screenshot past
 
 ## What works
 
-- Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor.
+- Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor. Pen strokes use fixed pressure, and text mode stays active for consecutive notes.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
 - Nested folders with rename, move, drag into another folder, and recoverable Trash.
-- Folder-scoped search across board names, typed notes, and recognized English screenshot text. Results jump to the matching element.
+- Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.
 - Local autosave in IndexedDB, partitioned by account, plus Supabase sync when configured and signed in.
 - Images stored in private Supabase Storage or a private Google Drive “Note images” folder. Supabase stores Drive file IDs and OCR text; image bytes are not embedded in cloud board JSON.
-- Free local OCR with bundled Tesseract.js workers, WASM, and English language data.
+- Free local printed-text OCR with bundled Tesseract.js workers, WASM, and English language data. Pasted and downloaded images are indexed automatically; Read text lets you retry.
+- Lock view holds both zoom and pan while you write, and is saved per board.
+- Read text → Read handwriting groups selected pen strokes (or all handwriting) into lines. Recognize handwriting runs quantized TrOCR locally in a worker; review/edit the words and choose Save searchable text. The first use downloads about 90 MB from Hugging Face; model files use the browser cache. No board images are sent to the model host or a paid API. You can enter the searchable words manually without downloading the model.
 - Installable PWA, light/dark appearance, PNG export, and portable workspace backups including images.
 - Revision checks preserve a conflict copy when two devices edit the same item.
 
@@ -29,7 +31,7 @@ npm run build
 npm run preview
 ```
 
-The postinstall script copies fonts, OCR assets, and the database setup into `public/`. Generated assets are ignored by Git. Do not interrupt the first install while these assets are copying.
+The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, and the database setup into `public/`. Generated assets are ignored by Git. Do not interrupt the first install while these assets are copying.
 
 ## Connect cloud sync
 
@@ -95,10 +97,10 @@ Cmd replaces Ctrl on Mac. Browser-reserved Ctrl+N and Ctrl+Shift+N are avoided.
 
 Export in Settings → Preferences & backup before clearing browser data. Exports download all referenced image files; reconnect Google Drive first if required. Import creates new boards rather than replacing current ones. Backups contain private content; keep them outside the source repository.
 
-OCR recognizes printed English text; small screenshots, low contrast, and handwriting can be inaccurate. This app does not reproduce Nebo’s proprietary handwriting recognition. Offline use requires a successful first production load so the service worker can cache the editor and OCR assets. External sign-in and cloud sync need internet. The PWA uses update prompts, so an update will not silently reload an active editor.
+Image OCR recognizes printed English text; small screenshots and low contrast can be inaccurate. Handwriting uses the free [TrOCR small handwritten model](https://huggingface.co/Xenova/trocr-small-handwritten), designed for single lines, and needs review. This app does not reproduce Nebo’s proprietary handwriting recognition. Re-read after editing pen strokes; stale handwriting indexes are excluded from search. Recognition is an explicit action so phones do not download or run the handwriting model while writing. Offline use requires a successful first production load so the service worker can cache the editor and OCR assets. External sign-in and cloud sync need internet. The PWA uses update prompts, so an update will not silently reload an active editor.
 
 Cloud sync is personal-device sync, not real-time multi-user collaboration. Supabase free quotas and Google Drive account storage limits apply. Image deletion and storage reclamation are intentionally not automated. Search scans the loaded account’s board content and OCR metadata on-device; large libraries will eventually need server-side search.
 
 ## Validation
 
-`npm test` covers recursive folder scoping, typed and OCR search, deleted items, account separation, Trash, conflict preservation, SQL access policies, Google token storage, Google identity matching, declined Drive permission, expiry, and account switching. `npm run build` type-checks and generates the production site. Google OAuth must be enabled with the app owner's credentials before live sign-in and Drive uploads can be validated.
+`npm test` also covers constant pen pressure, sticky text mode, view locking, handwriting scoping and stale indexes, OCR deduplication/retries and failures. It covers recursive folder scoping, typed and OCR search, deleted items, account separation, Trash, conflict preservation, SQL access policies, Google token storage, Google identity matching, declined Drive permission, expiry, and account switching. `npm run build` type-checks and generates the production site. Google OAuth must be enabled with the app owner's credentials before live sign-in and Drive uploads can be validated.
