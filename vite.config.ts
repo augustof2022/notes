@@ -20,11 +20,11 @@ export default defineConfig({
     workbox: {
       maximumFileSizeToCacheInBytes: 8000000,
       globPatterns: ['**/*.{js,css,html,svg,png,woff2,wasm,gz}'],
-      globIgnores: ['**/setup.html', '**/handwriting/**', '**/ort-*.wasm'],
+      globIgnores: ['**/setup.html', '**/about.html', '**/privacy.html', '**/terms.html', '**/handwriting/**', '**/ort-*.wasm'],
       skipWaiting: true,
       clientsClaim: true,
       navigateFallback: 'index.html',
-      navigateFallbackDenylist: [/^\/auth\//, /\/setup\.html$/]
+      navigateFallbackDenylist: [/^\/auth\//, /\/(setup|about|privacy|terms)\.html$/]
     }
   })],
   worker: { format: 'es' },

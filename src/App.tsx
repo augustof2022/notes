@@ -281,6 +281,7 @@ export default function App() {
         <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setView('trash'); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{trash.length > 0 && <span className="count">{trash.length}</span>}</button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'help' })}><Keyboard size={16} /><span>Keyboard shortcuts</span><kbd>?</kbd></button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'settings' })}><SettingsIcon size={16} /><span>Settings & storage</span></button>
+        <nav className="legal-links" aria-label="About and policies"><a href="./about.html" target="_blank" rel="noreferrer">About</a><a href="./privacy.html" target="_blank" rel="noreferrer">Privacy</a><a href="./terms.html" target="_blank" rel="noreferrer">Terms</a></nav>
         <div className="account-box"><span className="avatar">{session?.user.email?.[0]?.toUpperCase() || 'Y'}</span><div><strong>{session?.user.email || 'Your workspace'}</strong><span>{scope === 'local' ? 'On this device' : settings.imageStore === 'drive' ? 'Supabase + Google Drive' : 'Supabase cloud'}</span></div><button className="icon-button" aria-label={session ? 'Account settings' : 'Sign in to sync'} onClick={() => setDialog({ kind: session ? 'settings' : 'auth' })}><ArrowUpRight size={17} /></button></div>
       </div>
     </aside>
@@ -345,6 +346,7 @@ function AuthDialog({ configured, client, initialError, onGoogle, onClose, onCon
   return <Modal title={configured ? 'Your workspace, anywhere' : 'Connect your workspace'} onClose={onClose}>
     {!configured ? <><p className="dialog-description">Add your Supabase project in Settings to sign in and sync boards across devices. You can keep using Note on this device while you set it up.</p><div className="dialog-actions"><button className="secondary-button" onClick={onClose}>Stay on this device</button><button className="primary-button" onClick={onConfigure}>Open Settings <ArrowUpRight size={16} /></button></div></> : <>
       <p className="dialog-description">Sign in with Google to keep your boards in your private workspace and save new images to your own Google Drive.</p>
+      <p className="small-note">Cloud notes are accessible to the service operator. Read the <a href="./privacy.html" target="_blank" rel="noreferrer">privacy policy</a> and <a href="./terms.html" target="_blank" rel="noreferrer">terms of service</a> before signing in.</p>
       <button type="button" className="google-sign-in" disabled={busy} onClick={() => action(onGoogle)}>{busy ? 'Please wait…' : 'Continue with Google'}</button>
       <p className="small-note">Google will ask permission to save images in a private “Note images” folder. Your other Drive files stay outside the app’s access.</p>
       <button type="button" className="text-button email-choice" disabled={busy} onClick={() => { setUseEmail(!useEmail); setError(''); setNotice(''); }}>{useEmail ? 'Hide email sign-in' : 'Use email instead'}</button>

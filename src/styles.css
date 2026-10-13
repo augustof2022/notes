@@ -25,3 +25,4 @@
 .note-pen-width-slot .pen-width-control input[type="range"]{grid-column:1/-1;width:100%;margin:6px 0}
 .note-pen-width-slot .pen-width-control input[type="number"]{width:100%;min-width:0}
 .note-pen-width-slot .pen-width-control button{font-size:11px;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink)}
+.legal-links{display:flex;gap:16px;padding:9px 15px;font-size:10px}.legal-links a{color:var(--muted);text-decoration:none}.legal-links a:hover,.small-note a{color:var(--accent);text-decoration:underline}

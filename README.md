@@ -49,6 +49,14 @@ Device boards stay separate when signing in. Use Settings → Cloud sync → Cop
 
 ## Google Drive images
 
+### Public Google sign-in branding
+
+Public informational pages are served without sign-in or JavaScript: `about.html`, `privacy.html`, and `terms.html`. These pages identify Note, describe Google permissions and operator access, and provide the user-approved support contact. Privacy and terms are also linked in the app and sign-in dialog.
+
+For this deployment, use app name **Note**, support email **renz.r.salvador@gmail.com**, homepage **https://augustof2022.github.io/notes/about.html**, privacy policy **https://augustof2022.github.io/notes/privacy.html**, and terms **https://augustof2022.github.io/notes/terms.html**. Keep the authorized domains `augustof2022.github.io` and `wrkoxjlzdeiffdtgbyvq.supabase.co`. Logo upload is optional; `public/icon-192.png` is the existing square Note icon. Save Branding before opening Audience → Publish app. If Google requests domain or brand verification, complete that separately; a saved form does not confirm verification or production status. Publishing public sign-in requires the app owner's confirmation.
+
+The support address on these pages is public. Keep the policy accurate when changing storage, access, retention, or recognition behavior. Deletion requests are manual; Trash preserves records and files, and no automatic storage cleanup is implemented.
+
 The **Continue with Google** button combines Supabase Google login and the `drive.file` permission. Each person uses their own Google account, and new image uploads go to that person's private “Note images” folder. No public file permissions or access links are created. Email login and Supabase image storage remain available.
 
 This is a **one-time app owner setup**. People using Note do not need Google Cloud projects or client IDs:
