@@ -20,6 +20,7 @@
 .board-canvas .excalidraw .scroll-back-to-content{bottom:90px}
 @media(max-width:760px){.board-canvas .excalidraw .scroll-back-to-content{bottom:200px}}
 .board-canvas .excalidraw .note-pen-width>.buttonList{display:none}
+.grid-size-controls{display:grid;gap:16px}.grid-size-controls label{margin-bottom:0}.grid-size-controls input[type="range"]{width:100%;accent-color:var(--accent)}.grid-size-presets{display:flex;flex-wrap:wrap;gap:8px}.grid-size-presets button[aria-pressed="true"]{background:var(--accent-light);color:var(--accent);border-color:var(--accent)}.canvas-tools .snap-mode-button{min-width:112px;justify-content:center}
 .note-pen-width-slot .pen-width-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:2px 0;border:0;width:100%}
 .note-pen-width-slot .pen-width-control>span{display:none}
 .note-pen-width-slot .pen-width-control input[type="range"]{grid-column:1/-1;width:100%;margin:6px 0}

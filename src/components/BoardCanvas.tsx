@@ -8,6 +8,8 @@ import type { Board, Settings, ViewLock } from '../types';
 import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
 import { PenWidthPanel } from './PenWidthPanel';
+import { SnapControls } from './SnapControls';
+import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { installLockedPan } from '../lib/locked-pan';
 import { db, touch } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
@@ -25,7 +27,7 @@ function cleanAppState(state: AppState): Board['appState'] {
   return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
     currentItemFontFamily: state.currentItemFontFamily, currentItemRoughness: state.currentItemRoughness,
     currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemFontSize: state.currentItemFontSize,
-    gridSize: state.gridSize, gridStep: state.gridStep, gridModeEnabled: state.gridModeEnabled };
+    gridStep: state.gridStep, ...restoreSnapping(state) };
 }
 function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<AppState>) {
   return `${elements.map(x => `${x.id}:${x.version}:${x.isDeleted}`).join('|')}:${JSON.stringify(state)}`;
@@ -35,6 +37,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
+  const [snapping, setSnapping] = useState(() => restoreSnapping(board.appState));
   const viewLock = useRef<ViewLock | null>(board.appState.noteViewLock || null);
   const previousTool = useRef<string>('selection');
   const correcting = useRef(false);
@@ -63,7 +66,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     }
     return localSceneFiles(board.scope, board.assetIds);
   }
-  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
+  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
   async function flush() {
     if (timer.current) clearTimeout(timer.current);
     const snapshot = pending.current; pending.current = null;
@@ -80,6 +83,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   }
   function changed(elements: readonly ExcalidrawElement[], state: AppState, files: BinaryFiles) {
     if (correcting.current) return;
+    const nextSnapping = restoreSnapping(state);
+    setSnapping(previous => previous.gridSize === nextSnapping.gridSize && previous.gridModeEnabled === nextSnapping.gridModeEnabled && previous.objectsSnapModeEnabled === nextSnapping.objectsSnapModeEnabled ? previous : nextSnapping);
     const selectedPen = elements.find(x => x.type === 'freedraw' && !x.isDeleted && state.selectedElementIds[x.id]);
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
@@ -122,6 +127,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     }
     setWidthValue(width);
     api.updateScene({ elements, appState: { currentItemStrokeWidth: width }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  }
+  function changeSnapping(mode: SnapMode, size = api?.getAppState().gridSize) {
+    api?.updateScene({ appState: snapState(mode, size), captureUpdate: CaptureUpdateAction.NEVER });
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo,
     reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
@@ -176,7 +184,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (signature === lastSignature.current) return;
     lastSignature.current = signature;
     viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
-    api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState } });
+    api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
     void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
   }, [board.remoteRevision]);
   return <div className="board-canvas" ref={setCanvasRoot}>
@@ -189,6 +197,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
     }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</button>
       <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button>
+      <SnapControls mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} />
       </div>}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
