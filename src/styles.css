@@ -21,6 +21,13 @@
 @media(max-width:760px){.board-canvas .excalidraw .scroll-back-to-content{bottom:200px}}
 .board-canvas .excalidraw .note-pen-width>.buttonList{display:none}
 .grid-size-controls{display:grid;gap:16px}.grid-size-controls label{margin-bottom:0}.grid-size-controls input[type="range"]{width:100%;accent-color:var(--accent)}.grid-size-presets{display:flex;flex-wrap:wrap;gap:8px}.grid-size-presets button[aria-pressed="true"]{background:var(--accent-light);color:var(--accent);border-color:var(--accent)}.canvas-tools .snap-mode-button{min-width:112px;justify-content:center}
+/* Follow the editor's mobile layout, including tablets with a visible sidebar.
+   Keep board controls outside its bottom toolbar and expandable style panel. */
+.board-canvas:has(> .excalidraw--mobile){display:flex;flex-direction:column}
+.board-canvas:has(> .excalidraw--mobile)>.excalidraw{flex:1;min-height:0}
+.board-canvas:has(> .excalidraw--mobile)>.canvas-tools{position:static;order:-1;flex-shrink:0;align-self:center;transform:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:calc(100% - 24px);max-width:440px;margin:8px 12px;z-index:5}
+.board-canvas:has(> .excalidraw--mobile)>.canvas-tools button{min-width:0;min-height:44px;justify-content:center}
+@media(min-width:560px){.board-canvas:has(> .excalidraw--mobile)>.canvas-tools{grid-template-columns:repeat(4,auto);width:max-content;max-width:calc(100% - 24px)}}
 .note-pen-width-slot .pen-width-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:2px 0;border:0;width:100%}
 .note-pen-width-slot .pen-width-control>span{display:none}
 .note-pen-width-slot .pen-width-control input[type="range"]{grid-column:1/-1;width:100%;margin:6px 0}

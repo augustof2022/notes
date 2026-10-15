@@ -192,7 +192,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
-    {api && <div className="canvas-tools"><button aria-pressed={viewLocked} onClick={() => {
+    {api && <div className="canvas-tools" role="group" aria-label="Board controls"><button aria-pressed={viewLocked} onClick={() => {
       const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
       setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
     }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</button>
