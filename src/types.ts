@@ -4,7 +4,7 @@ import type { AppState, BinaryFiles } from '@excalidraw/excalidraw/types';
 export type ImageStore = 'supabase' | 'drive';
 export interface RecordBase {
   key: string; id: string; scope: string; name: string;
-  updatedAt: string; deleted: boolean; dirty: boolean; remoteRevision: number;
+  createdAt?: string; updatedAt: string; deleted: boolean; dirty: boolean; remoteRevision: number;
 }
 export interface Folder extends RecordBase { parentId: string | null; color: string }
 export interface Board extends RecordBase {

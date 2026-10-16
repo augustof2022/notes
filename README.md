@@ -2,13 +2,15 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
+Current release: **v0.2.0**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
+
 ## What works
 
 - Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor. Pen strokes use fixed pressure, and text mode stays active for consecutive notes.
 - Board snapping: tap **Snap: Off → Elements → Grid → Off** in the canvas controls. Elements shows alignment guides and snaps nearby edges, centers, and spacing while dragging. Grid shows a visible grid and snaps placement to its cells. Tap the adjacent size button to adjust each board’s grid from 1–100 pixels (default 20); the mode and size are saved with the board. Existing items stay in place until moved. Pen strokes remain freehand.
 - Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
-- Nested folders with rename, move, drag into another folder, and recoverable Trash.
+- Nested folders with rename, move, drag into another folder, and recoverable Trash. Library sections have separate New folder and New board actions. Folders and boards sort independently by name (A–Z/Z–A), creation date, or last modification (newest/oldest); choices are remembered on the device and also order the sidebar.
 - Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.
 - Local autosave in IndexedDB, partitioned by account, plus Supabase sync when configured and signed in.
 - Images stored in private Supabase Storage or a private Google Drive “Note images” folder. Supabase stores Drive file IDs and OCR text; image bytes are not embedded in cloud board JSON.
@@ -39,10 +41,11 @@ The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, a
 ## Build a diagram
 
 1. Open a board and choose **Diagrams**. Select a diagram system and a shape, then choose **Add** and tap the board to place it. Text editing opens immediately; type the label and click outside or press Escape to finish. Table names and column/key lists are editable text.
-2. Select a diagram shape to show its three quick actions. **Add child** creates a connected node below that shape. **Add sibling** creates another node beside it with the same parent; its connection goes to that shared parent. Adding a sibling to a root creates another root. New nodes avoid existing diagram shapes, and the view pans to keep a new node visible.
-3. **Add connection** starts a link to another diagram shape. Choose From and To sides, then tap the target. Connections back to earlier nodes are allowed and do not change parent/child relationships. Escape or Cancel stops placement or connecting.
-4. Select a connection and choose **Line options** for its sides, straight/right-angle/curved route, endpoint symbols, weight, solid/dashed/dotted style, or a double line. **Edit bends** opens point editing for straight/curved connections; drag a middle segment of a right-angle connection to adjust its route. **Label** adds or edits connection text.
-5. Open **Diagrams** with a shape or connection selected to change its colors and lines. A **Diagram theme** colors that connected diagram, leaving other diagrams and ordinary board content alone. Creating a new standalone shape starts a separate diagram; connecting two diagrams joins their theme scope. Exit diagram mode from the palette to hide its quick actions.
+2. Select a diagram shape to show its four quick actions. **Add child** creates a connected node below that shape. **Add sibling** creates another node beside it with the same parent; its connection goes to that shared parent. Adding a sibling to a root creates another root. New nodes avoid existing diagram shapes, and the view pans to keep a new node visible.
+3. **Edit shape** opens the palette for a selected node. Pick a shape from the same diagram system and choose **Apply … to selected shape** to keep the node’s text, colors, hierarchy, and connections. **Add child** and **Add sibling** first offer that system’s shapes when more than one is available, then add the chosen shape. Systems with one shape add it directly. **Add new …** places a separate diagram. Canvas object menus are hidden while the palette is open, including on mobile.
+4. **Add connection** starts a link to another diagram shape. Choose From and To sides, then tap the target. Connections back to earlier nodes are allowed and do not change parent/child relationships. Escape or Cancel stops placement or connecting.
+5. Select a connection and choose **Line options** for its sides, straight/right-angle/curved route, endpoint symbols, weight, solid/dashed/dotted style, or a double line. **Edit bends** opens point editing for straight/curved connections; drag a middle segment of a right-angle connection to adjust its route. **Label** adds or edits connection text.
+6. Open **Diagrams** with a shape or connection selected to change its colors and lines. A **Diagram theme** colors that connected diagram, leaving other diagrams and ordinary board content alone. Creating a new standalone shape starts a separate diagram; connecting two diagrams joins their theme scope. Exit diagram mode from the palette to hide its quick actions.
 
 Shapes, text, hierarchy, and connection settings autosave with the board and are included in sync and backups. These are visual diagram templates; there is no database schema generation or strict notation validation.
 
@@ -52,6 +55,7 @@ This checkout is already configured for the browser-safe endpoint of your Supaba
 
 1. Create or select a **free Supabase project**.
 2. Run [`supabase/schema.sql`](supabase/schema.sql) in its SQL Editor. It creates account-isolated folders, boards, asset metadata, optimistic-save RPC, and a private image bucket. It is safe to rerun.
+   For existing projects upgrading to v0.2.0, rerun this schema to add stable `created_at` values for folders and boards. New items retain their offline creation date when synced. Earlier releases did not record creation time, so older items use their earliest available saved timestamp; their exact original creation date cannot be recovered. The app remains compatible with the previous schema while you apply the update, but creation dates will not sync consistently between devices until it is applied.
 3. Add the project URL and browser-safe publishable/anon key in the app’s Settings → Cloud sync. Alternatively set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build time.
 4. Set the site URL and redirect allowlist in Supabase Authentication → URL Configuration.
 5. Choose **Continue with Google** after configuring the Google provider below. It creates or signs into your Note account and requests permission to store images in your own Drive. Alternatively choose Use email instead. Your Note account is separate from the Supabase dashboard account.

@@ -1,12 +1,22 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { db, newBoard, newFolder, descendantFolderIds, canMoveFolder, folderPath, loadWorkspace, trashFolder } from './db';
+import { db, newBoard, newFolder, descendantFolderIds, canMoveFolder, folderPath, loadWorkspace, trashFolder, touch } from './db';
 import { searchBoards } from './search';
 import { preserveConflict } from './sync';
 import type { Asset, Board, Folder } from '../types';
 import { recordKey } from '../types';
 afterEach(async () => { await Promise.all([db.folders.clear(), db.boards.clear(), db.assets.clear()]); });
 describe('workspace hierarchy and scoped search', () => {
+  it('records creation times for folders and boards independently of later edits', async () => {
+    const folder = await newFolder('local', 'Created folder', null);
+    const board = await newBoard('local', 'Created board', folder.id);
+    expect(Number.isFinite(Date.parse(folder.createdAt!))).toBe(true);
+    expect(Number.isFinite(Date.parse(board.createdAt!))).toBe(true);
+    await db.boards.update(board.key, { name: 'Renamed', ...touch(), updatedAt: '2030-01-01T00:00:00Z' });
+    await db.folders.update(folder.key, { name: 'Renamed folder', ...touch() });
+    expect((await db.boards.get(board.key))?.createdAt).toBe(board.createdAt);
+    expect((await db.folders.get(folder.key))?.createdAt).toBe(folder.createdAt);
+  });
   it('finds nested folders at any depth and rejects moving a folder into its descendants', async () => {
     const parent = await newFolder('local', 'Parent', null);
     const child = await newFolder('local', 'Child', parent.id);

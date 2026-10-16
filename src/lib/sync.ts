@@ -8,14 +8,14 @@ import { pendingImageMessage, syncErrorMessage } from './sync-status';
 
 type CloudRow = Record<string, any>;
 function folderFromCloud(row: CloudRow, scope: string): Folder {
-  return { key: recordKey(scope, row.id), id: row.id, scope, name: row.name, parentId: row.parent_id, color: row.color, updatedAt: row.updated_at, deleted: row.deleted, dirty: false, remoteRevision: row.revision };
+  return { key: recordKey(scope, row.id), id: row.id, scope, name: row.name, parentId: row.parent_id, color: row.color, createdAt: row.created_at || row.updated_at, updatedAt: row.updated_at, deleted: row.deleted, dirty: false, remoteRevision: row.revision };
 }
 function boardFromCloud(row: CloudRow, scope: string): Board {
-  return { key: recordKey(scope, row.id), id: row.id, scope, name: row.name, folderId: row.folder_id, elements: row.elements || [], appState: row.app_state || {}, assetIds: row.asset_ids || [], preview: null, updatedAt: row.updated_at, deleted: row.deleted, dirty: false, remoteRevision: row.revision };
+  return { key: recordKey(scope, row.id), id: row.id, scope, name: row.name, folderId: row.folder_id, elements: row.elements || [], appState: row.app_state || {}, assetIds: row.asset_ids || [], preview: null, createdAt: row.created_at || row.updated_at, updatedAt: row.updated_at, deleted: row.deleted, dirty: false, remoteRevision: row.revision };
 }
 export function preserveConflict<T extends Board | Folder>(record: T): T {
   const id = crypto.randomUUID();
-  return { ...record, id, key: recordKey(record.scope, id), name: `${record.name} (conflict copy)`, remoteRevision: 0, ...touch() };
+  return { ...record, id, key: recordKey(record.scope, id), name: `${record.name} (conflict copy)`, createdAt: new Date().toISOString(), remoteRevision: 0, ...touch() };
 }
 async function allRows(client: SupabaseClient, table: string, scope: string) {
   const result: CloudRow[] = [];
@@ -91,8 +91,8 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
       }
     }
     const payload = isBoard
-      ? { id: record.id, name: record.name, folder_id: record.folderId, elements: record.elements, app_state: record.appState, asset_ids: record.assetIds, deleted: record.deleted }
-      : { id: record.id, name: record.name, parent_id: record.parentId, color: record.color, deleted: record.deleted };
+      ? { id: record.id, created_at: record.createdAt || record.updatedAt, name: record.name, folder_id: record.folderId, elements: record.elements, app_state: record.appState, asset_ids: record.assetIds, deleted: record.deleted }
+      : { id: record.id, created_at: record.createdAt || record.updatedAt, name: record.name, parent_id: record.parentId, color: record.color, deleted: record.deleted };
     const { data, error } = await client.rpc('save_note', { p_kind: isBoard ? 'board' : 'folder', p_record: payload, p_expected_revision: record.remoteRevision });
     const table = isBoard ? db.boards : db.folders;
     if (error) {
@@ -116,11 +116,11 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
   await db.transaction('rw', db.folders, db.boards, db.assets, async () => {
     for (const row of cloudFolders) {
       const existing = await db.folders.get(recordKey(scope, row.id));
-      if (!existing?.dirty) await db.folders.put(folderFromCloud(row, scope));
+      if (!existing?.dirty) await db.folders.put({ ...folderFromCloud(row, scope), createdAt: row.created_at || existing?.createdAt || row.updated_at });
     }
     for (const row of cloudBoards) {
       const existing = await db.boards.get(recordKey(scope, row.id));
-      if (!existing?.dirty) await db.boards.put({ ...boardFromCloud(row, scope), preview: existing?.preview || null });
+      if (!existing?.dirty) await db.boards.put({ ...boardFromCloud(row, scope), createdAt: row.created_at || existing?.createdAt || row.updated_at, preview: existing?.preview || null });
     }
     for (const row of cloudAssets) {
       const existing = await db.assets.get(recordKey(scope, row.id));
@@ -137,11 +137,11 @@ export async function importLocalWorkspace(scope: string) {
   await db.transaction('rw', db.folders, db.boards, db.assets, async () => {
     for (const folder of folders.filter(x => !x.deleted)) {
       const id = folderIds.get(folder.id)!;
-      await db.folders.put({ ...folder, id, key: recordKey(scope, id), scope, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...touch() });
+      await db.folders.put({ ...folder, createdAt: folder.createdAt || folder.updatedAt, id, key: recordKey(scope, id), scope, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...touch() });
     }
     for (const board of boards.filter(x => !x.deleted)) {
       const id = crypto.randomUUID();
-      await db.boards.put({ ...board, id, key: recordKey(scope, id), scope, folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...touch() });
+      await db.boards.put({ ...board, createdAt: board.createdAt || board.updatedAt, id, key: recordKey(scope, id), scope, folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...touch() });
     }
     for (const asset of assets) {
       const key = recordKey(scope, asset.id);

@@ -1,4 +1,4 @@
-import { convertToExcalidrawElements, mutateElement } from '@excalidraw/excalidraw';
+import { convertToExcalidrawElements, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { ExcalidrawElementSkeleton } from '@excalidraw/excalidraw/data/transform';
 import type {
   Arrowhead, ExcalidrawArrowElement, ExcalidrawElement, ExcalidrawLinearElement, FixedPoint,
@@ -99,6 +99,49 @@ export function createDiagramNode(
     customData: { noteDiagram: decorationData(data, id) },
   }], { regenerateIds: false });
   return [shape, outline, ...labels];
+}
+
+/** Keep the node identity, labels, hierarchy and arrow bindings during a shape change. */
+export function changeDiagramNodeShape(elements: readonly ExcalidrawElement[], nodeId: string, preset: DiagramPreset): ExcalidrawElement[] {
+  const node = elements.find(element => element.id === nodeId && !element.isDeleted);
+  const data = node && readDiagramData(node);
+  if (!node || data?.kind !== 'node' || data.system !== preset.system) return [...elements];
+  if (data.shapeId === preset.id) return [...elements];
+  const text = elements.find(element => !element.isDeleted && element.type === 'text' && element.containerId === node.id);
+  const groupIds = node.groupIds.length ? node.groupIds : preset.doubleOutline ? [crypto.randomUUID()] : [];
+  const nextData: DiagramNodeData = { ...data, shapeId: preset.id };
+  // Let Excalidraw calculate the label's available area for the new geometry.
+  const measured = convertToExcalidrawElements([{
+    type: preset.type, x: node.x, y: node.y, width: node.width, height: node.height,
+    ...(text?.type === 'text' ? { label: { text: text.originalText, fontSize: text.fontSize, fontFamily: text.fontFamily, textAlign: text.textAlign, verticalAlign: text.verticalAlign } } : {}),
+  }], { regenerateIds: false });
+  const shape = measured[0];
+  const measuredText = measured.find(element => element.type === 'text');
+  const replacement = newElementWith(node, {
+    type: preset.type, width: shape.width, height: shape.height, roundness: null, groupIds,
+    customData: { ...node.customData, noteDiagram: nextData },
+  });
+  const result = elements.map(element => {
+    if (element.id === node.id) return replacement;
+    const meta = readDiagramData(element);
+    if (element.id === text?.id && element.type === 'text' && measuredText?.type === 'text') {
+      return newElementWith(element, { x: measuredText.x, y: measuredText.y, width: measuredText.width, height: measuredText.height, text: measuredText.text, groupIds });
+    }
+    if (!element.isDeleted && meta?.kind === 'decoration' && meta.nodeId === node.id && element.type !== 'text') return newElementWith(element, { isDeleted: true });
+    return element;
+  });
+  if (preset.doubleOutline) {
+    const [outline] = convertToExcalidrawElements([{
+      type: preset.type, x: node.x + OUTLINE_INSET, y: node.y + OUTLINE_INSET,
+      width: Math.max(1, shape.width - OUTLINE_INSET * 2), height: Math.max(1, shape.height - OUTLINE_INSET * 2),
+      angle: node.angle, strokeColor: node.strokeColor, backgroundColor: 'transparent',
+      strokeWidth: node.strokeWidth, strokeStyle: node.strokeStyle, roughness: node.roughness, roundness: null, groupIds,
+      customData: { noteDiagram: decorationData(nextData, node.id) },
+    }], { regenerateIds: false });
+    result.splice(result.findIndex(element => element.id === node.id) + 1, 0, outline);
+  }
+  repairDiagramElements(result);
+  return result;
 }
 
 /** Offset each segment and intersect adjacent offsets to keep double lines parallel around bends. */

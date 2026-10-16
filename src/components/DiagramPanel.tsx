@@ -26,8 +26,12 @@ export type DiagramPanelProps = {
   onSystemChange: (system: DiagramSystemId) => void;
   onPresetChange: (presetId: string) => void;
   onAddShape: () => void;
-  selectedNode: { id: string; label: string; parentId?: string | null } | null;
+  selectedNode: { id: string; label: string; shapeId: string; parentId?: string | null } | null;
   selectedEdge: boolean;
+  onApplyShape: () => void;
+  pendingRelation: 'child' | 'sibling' | null;
+  onConfirmRelated: () => void;
+  onCancelRelated: () => void;
   onAddSibling: () => void;
   onAddChild: () => void;
   onConnect: () => void;
@@ -133,7 +137,7 @@ export function DiagramPanel(props: DiagramPanelProps) {
           <button type="button" onClick={props.onCancelConnection}>Cancel connection</button>
         </div>}
 
-        {props.selectedNode && !props.selectedEdge && <section className="diagram-selection" aria-labelledby={`${id}-selection`}>
+        {props.selectedNode && !props.selectedEdge && !props.pendingRelation && <section className="diagram-selection" aria-labelledby={`${id}-selection`}>
           <div className="diagram-section-heading">
             <h3 id={`${id}-selection`}>Selected shape</h3>
             <span className="diagram-selected-label" title={props.selectedNode.label}>{props.selectedNode.label || 'Untitled shape'}</span>
@@ -144,14 +148,15 @@ export function DiagramPanel(props: DiagramPanelProps) {
             <button type="button" onClick={props.onConnect}><Link2 size={17} aria-hidden="true" />Add connection</button>
             <button type="button" onClick={props.onEditLabel}><Type size={17} aria-hidden="true" />Edit text</button>
           </div>
-          <p className="diagram-help">A child goes under this shape. A sibling shares its parent and sits alongside it.</p>
+          <p className="diagram-help">Choose a shape below to change this object, or add a child or sibling with its own shape.</p>
         </section>}
 
         <section className="diagram-palette" aria-labelledby={`${id}-palette`}>
-          <div className="diagram-section-heading"><h3 id={`${id}-palette`}><Shapes size={17} aria-hidden="true" />Shape library</h3></div>
+          <div className="diagram-section-heading"><h3 id={`${id}-palette`}><Shapes size={17} aria-hidden="true" />{props.pendingRelation ? `Choose ${props.pendingRelation} shape` : 'Shape library'}</h3></div>
+          {props.pendingRelation && <p className="diagram-help" role="status">Adding a {props.pendingRelation} to “{props.selectedNode?.label || 'Untitled shape'}”. Choose its shape, then add it.</p>}
           <label className="diagram-field" htmlFor={`${id}-system`}>
             <span>Diagram system</span>
-            <select id={`${id}-system`} aria-label="Diagram system" value={props.system} onChange={event => props.onSystemChange(event.target.value as DiagramSystemId)}>
+            <select id={`${id}-system`} aria-label="Diagram system" value={props.system} disabled={!!props.pendingRelation} onChange={event => props.onSystemChange(event.target.value as DiagramSystemId)}>
               {DIAGRAM_SYSTEMS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
@@ -162,8 +167,11 @@ export function DiagramPanel(props: DiagramPanelProps) {
               <span>{preset.label}</span>
             </button>)}
           </div>
-          <button type="button" className="primary-button diagram-add-shape" onClick={props.onAddShape}><Plus size={18} aria-hidden="true" />Add {selectedPreset?.label || 'shape'}</button>
-          <p className="diagram-help">Add a shape, then type its text. Move and resize it directly on the board.</p>
+          {props.pendingRelation ? <div className="diagram-palette-actions"><button type="button" className="primary-button" onClick={props.onConfirmRelated}><Plus size={18} aria-hidden="true" />Add {selectedPreset.label} as {props.pendingRelation}</button><button type="button" className="secondary-button" onClick={props.onCancelRelated}>Cancel</button></div> : <>
+            {props.selectedNode && <button type="button" className="primary-button diagram-add-shape" disabled={props.selectedNode.shapeId === props.presetId} onClick={props.onApplyShape}><Shapes size={18} aria-hidden="true" />Apply {selectedPreset.label} to selected shape</button>}
+            <button type="button" className={`${props.selectedNode ? 'secondary' : 'primary'}-button diagram-add-shape`} onClick={props.onAddShape}><Plus size={18} aria-hidden="true" />Add new {selectedPreset.label}</button>
+          </>}
+          <p className="diagram-help">{props.selectedNode && !props.pendingRelation ? 'Applying a shape keeps its text, colors, and connections. Changing the diagram system starts a new diagram.' : 'After adding a shape, type its text. Move and resize it directly on the board.'}</p>
         </section>
 
         <details className="diagram-details" open={!!props.selectedEdge || props.connecting}>

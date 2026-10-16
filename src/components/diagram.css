@@ -449,3 +449,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Contain the editor's native mobile menus underneath app dialogs. */
+.board-canvas{isolation:isolate}
+.diagram-panel-open .excalidraw .App-menu,
+.diagram-panel-open .excalidraw .App-bottom-bar,
+.diagram-panel-open .excalidraw .layer-ui__wrapper{visibility:hidden}
+.diagram-node-quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:304px}
+.diagram-node-quick-actions button{min-height:44px}
+.diagram-palette-actions{display:flex;flex-wrap:wrap;gap:8px}
+.diagram-palette-actions>.primary-button{flex:1}
+.diagram-panel button:disabled{opacity:.5}

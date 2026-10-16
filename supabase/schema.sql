@@ -26,6 +26,17 @@ create table if not exists public.note_boards (
   updated_at timestamptz not null default now(),
   foreign key (folder_id, owner_id) references public.note_folders(id, owner_id)
 );
+-- Preserve creation time independently of edits, including on existing installs.
+-- Earlier versions only recorded updated_at; use that earliest known value.
+alter table public.note_folders add column if not exists created_at timestamptz;
+alter table public.note_boards add column if not exists created_at timestamptz;
+update public.note_folders set created_at = updated_at where created_at is null;
+update public.note_boards set created_at = updated_at where created_at is null;
+alter table public.note_folders alter column created_at set default now();
+alter table public.note_folders alter column created_at set not null;
+alter table public.note_boards alter column created_at set default now();
+alter table public.note_boards alter column created_at set not null;
+
 create table if not exists public.note_assets (
   owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   id text not null,
@@ -77,8 +88,8 @@ begin
   if uid is null then raise exception 'Sign in before syncing.'; end if;
   if p_kind = 'folder' then
     if p_expected_revision = 0 then
-      insert into public.note_folders(id, owner_id, name, parent_id, color, deleted)
-      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'parent_id')::uuid, p_record->>'color', coalesce((p_record->>'deleted')::boolean, false))
+      insert into public.note_folders(id, owner_id, name, parent_id, color, deleted, created_at)
+      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'parent_id')::uuid, p_record->>'color', coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()))
       on conflict (id) do nothing returning to_jsonb(note_folders.*) into result;
     else
       update public.note_folders set name = p_record->>'name', parent_id = (p_record->>'parent_id')::uuid, color = p_record->>'color', deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now()
@@ -86,8 +97,8 @@ begin
     end if;
   elsif p_kind = 'board' then
     if p_expected_revision = 0 then
-      insert into public.note_boards(id, owner_id, name, folder_id, elements, app_state, asset_ids, deleted)
-      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'folder_id')::uuid, p_record->'elements', p_record->'app_state', array(select jsonb_array_elements_text(p_record->'asset_ids')), coalesce((p_record->>'deleted')::boolean, false))
+      insert into public.note_boards(id, owner_id, name, folder_id, elements, app_state, asset_ids, deleted, created_at)
+      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'folder_id')::uuid, p_record->'elements', p_record->'app_state', array(select jsonb_array_elements_text(p_record->'asset_ids')), coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()))
       on conflict (id) do nothing returning to_jsonb(note_boards.*) into result;
     else
       update public.note_boards set name = p_record->>'name', folder_id = (p_record->>'folder_id')::uuid, elements = p_record->'elements', app_state = p_record->'app_state', asset_ids = array(select jsonb_array_elements_text(p_record->'asset_ids')), deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now()

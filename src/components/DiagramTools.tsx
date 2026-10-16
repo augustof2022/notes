@@ -5,7 +5,7 @@ import type { Arrowhead, ExcalidrawArrowElement, ExcalidrawElement } from '@exca
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { GitBranch, Link2, Plus, Shapes, SlidersHorizontal, Type } from 'lucide-react';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
-import { attachDiagramEdge, createDiagramEdge, createDiagramNode } from '../lib/diagram-scene';
+import { attachDiagramEdge, createDiagramEdge, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
 import './diagram.css';
 
@@ -52,6 +52,15 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const existing = api.getSceneElements().map(readDiagramData).find(data => data?.kind === 'node');
   const [enabled, setEnabled] = useState(!!existing);
   const [panel, setPanel] = useState(false);
+  const [pendingRelation, setPendingRelation] = useState<'child' | 'sibling' | null>(null);
+  useLayoutEffect(() => {
+    if (!root || !panel) return;
+    const wasInert = root.inert;
+    root.inert = true;
+    root.classList.add('diagram-panel-open');
+    api.updateScene({ appState: { openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
+    return () => { root.inert = wasInert; root.classList.remove('diagram-panel-open'); };
+  }, [root, panel, api]);
   const [system, setSystem] = useState<DiagramSystemId>(existing?.system || 'org');
   const [presetId, setPresetId] = useState(DIAGRAM_SYSTEMS.find(item => item.id === system)!.presets[0].id);
   const [baseStyle, setBaseStyle] = useState<DiagramStyle>({ fill: '#ede9fe', stroke: '#7c3aed', width: 2, strokeStyle: 'solid' });
@@ -81,6 +90,25 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (data.kind === 'node') setPresetId(data.shapeId);
   }, [chosen?.id]);
 
+  function openPanel() { setPendingRelation(null); setPanel(true); }
+  function closePanel() { setPendingRelation(null); setPanel(false); }
+  function chooseRelated(relation: 'child' | 'sibling') {
+    const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
+    const data = node && readDiagramData(node);
+    if (data?.kind !== 'node') return;
+    const palette = DIAGRAM_SYSTEMS.find(item => item.id === data.system)!;
+    if (palette.presets.length === 1) { addRelated(relation); return; }
+    setSystem(data.system); setPresetId(data.shapeId); setPendingRelation(relation); setPanel(true);
+  }
+  function applyShape() {
+    const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
+    const preset = DIAGRAM_SYSTEMS.find(item => item.id === system)?.presets.find(item => item.id === presetId);
+    if (!node || !preset) return;
+    const elements = changeDiagramNodeShape(api.getSceneElementsIncludingDeleted(), node.id, preset);
+    api.updateScene({ elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    onMessage(`Shape changed to ${preset.label}.`);
+  }
+
   function editLabel(element: ExcalidrawElement) {
     flushSync(() => {
       setPanel(false);
@@ -94,7 +122,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     const elements = api.getSceneElementsIncludingDeleted();
     attachDiagramEdge(elements, added);
     flushSync(() => {
-      setPanel(false); setPlacing(false); setSourceId(null); setPointer(null);
+      setPanel(false); setPendingRelation(null); setPlacing(false); setSourceId(null); setPointer(null);
       api.setActiveTool({ type: 'selection' });
       api.updateScene({ elements: [...elements, ...added], appState: { selectedElementIds: { [selectedId]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     });
@@ -236,17 +264,18 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const project = (point: [number, number]): [number, number] => [(point[0] + snapshot.state.scrollX) * snapshot.state.zoom.value + snapshot.state.offsetLeft - (bounds?.left || 0), (point[1] + snapshot.state.scrollY) * snapshot.state.zoom.value + snapshot.state.offsetTop - (bounds?.top || 0)];
   const nodeCenter = chosen && project([chosen.x + chosen.width / 2, chosen.y]);
   const editorTop = (root?.querySelector('.excalidraw')?.getBoundingClientRect().top || bounds?.top || 0) - (bounds?.top || 0);
-  const actionPosition = nodeCenter && { left: Math.max(8, Math.min((bounds?.width || 400) - 320, nodeCenter[0] - 152)), top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - 116, nodeCenter[1] - 52)) };
+  const actionHeight = selection.node ? 102 : 52;
+  const actionPosition = nodeCenter && { left: Math.max(8, Math.min((bounds?.width || 400) - 320, nodeCenter[0] - 152)), top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - actionHeight - 16, nodeCenter[1] - actionHeight - 8)) };
   const source = sourceId && snapshot.elements.find(element => element.id === sourceId);
   const start = source ? project(sidePoint(source, connection.fromSide)) : null;
   const selectedData = selection.node && readDiagramData(selection.node);
   const selectedStyle = chosen ? styleOf(chosen) : baseStyle;
   const selectedConnection = selection.edge ? settingsOf(selection.edge) : connection;
   return <>
-    {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { setEnabled(true); setPanel(true); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
-    {enabled && !panel && !placing && !sourceId && chosen && actionPosition && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down' && <div className="diagram-quick-actions" style={actionPosition} role="group" aria-label={selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions'}>
-      {selection.node ? <><button onClick={() => addRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => addRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button></>
-        : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={() => setPanel(true)}><SlidersHorizontal size={14} />Line options</button></>}
+    {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
+    {enabled && !panel && !placing && !sourceId && chosen && actionPosition && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions'}>
+      {selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
+        : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>}
     </div>}
     {(placing || sourceId) && <div className="diagram-operation" role="status" style={{ top: editorTop + 72 }}>
       <span>{placing ? 'Tap the board to place your shape, then type.' : 'Tap a target shape to connect. Loops back to earlier shapes are allowed.'}</span>
@@ -254,10 +283,10 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       <button onClick={cancelOperation}>Cancel</button>
     </div>}
     {sourceId && start && pointer && <svg className="diagram-connection-preview" aria-hidden="true"><path d={`M${start[0]} ${start[1]} L${pointer[0]} ${pointer[1]}`} /></svg>}
-    {panel && <DiagramPanel system={system} presetId={presetId} onSystemChange={value => { setSystem(value); setPresetId(DIAGRAM_SYSTEMS.find(item => item.id === value)!.presets[0].id); setConnection(defaults(value)); activeDiagram.current = null; api.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER }); }} onPresetChange={setPresetId}
+    {panel && <DiagramPanel system={system} presetId={presetId} onSystemChange={value => { setSystem(value); setPresetId(DIAGRAM_SYSTEMS.find(item => item.id === value)!.presets[0].id); setConnection(defaults(value)); activeDiagram.current = null; api.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER }); }} onPresetChange={setPresetId} onApplyShape={applyShape} pendingRelation={pendingRelation} onConfirmRelated={() => { if (pendingRelation) addRelated(pendingRelation); }} onCancelRelated={() => setPendingRelation(null)}
       onAddShape={() => { setPanel(false); setSourceId(null); setPlacing(true); api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair'); }}
-      selectedNode={selection.node && selectedData?.kind === 'node' ? { id: selection.node.id, label: labelOf(snapshot.elements, selection.node), parentId: selectedData.parentId } : null} selectedEdge={!!selection.edge}
-      onAddSibling={() => addRelated('sibling')} onAddChild={() => addRelated('child')} onConnect={beginConnection} onEditLabel={() => { if (chosen) editLabel(chosen); }} connecting={!!sourceId} onCancelConnection={cancelOperation}
-      connection={selectedConnection} onConnectionChange={applyConnection} style={selectedStyle} onStyleChange={applyStyle} onTheme={applyTheme} onClose={() => setPanel(false)} onExit={() => { setPanel(false); setEnabled(false); cancelOperation(); }} />}
+      selectedNode={selection.node && selectedData?.kind === 'node' ? { id: selection.node.id, label: labelOf(snapshot.elements, selection.node), shapeId: selectedData.shapeId, parentId: selectedData.parentId } : null} selectedEdge={!!selection.edge}
+      onAddSibling={() => chooseRelated('sibling')} onAddChild={() => chooseRelated('child')} onConnect={beginConnection} onEditLabel={() => { if (chosen) editLabel(chosen); }} connecting={!!sourceId} onCancelConnection={cancelOperation}
+      connection={selectedConnection} onConnectionChange={applyConnection} style={selectedStyle} onStyleChange={applyStyle} onTheme={applyTheme} onClose={closePanel} onExit={() => { closePanel(); setEnabled(false); cancelOperation(); }} />}
   </>;
 }

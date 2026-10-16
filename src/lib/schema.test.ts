@@ -39,6 +39,20 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await pg?.close(); });
 describe('Supabase schema and access isolation', () => {
+  it('preserves an offline creation date across cloud saves and schema reruns', async () => {
+    await asUser(userA);
+    const id = '77777777-7777-4777-8777-777777777777';
+    const original = { id, name: 'Offline folder', parent_id: null, color: '#aaa', created_at: '2025-05-03T04:00:00Z' };
+    const saved = await save('folder', original, 0);
+    expect(new Date(saved.created_at).toISOString()).toBe('2025-05-03T04:00:00.000Z');
+    const updated = await save('folder', { ...original, name: 'Renamed', created_at: '2030-01-01T00:00:00Z' }, 1);
+    expect(updated.created_at).toBe(saved.created_at);
+    await pg.exec('reset role');
+    await pg.exec(readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8'));
+    await asUser(userA);
+    const result = await pg.query<{ created_at: string }>('select created_at from public.note_folders where id=$1', [id]);
+    expect(new Date(result.rows[0].created_at).toISOString()).toBe('2025-05-03T04:00:00.000Z');
+  });
   it('creates a folder, its child, and a board as the signed-in owner', async () => {
     await asUser(userA);
     const root = await save('folder', { id: parent, name: 'Projects', parent_id: null, color: '#b6a5e5' }, 0);
