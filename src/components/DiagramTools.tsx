@@ -13,11 +13,12 @@ function selectedDiagram(elements: readonly ExcalidrawElement[], state: AppState
   const byId = new Map(elements.map(element => [element.id, element]));
   const selected = new Map<string, ExcalidrawElement>();
   for (const element of elements) {
-    if (element.isDeleted || !state.selectedElementIds[element.id]) continue;
+    if (element.isDeleted || element.locked || !state.selectedElementIds[element.id]) continue;
     let primary = element;
     if (element.type === 'text' && element.containerId) primary = byId.get(element.containerId) || element;
     const data = readDiagramData(primary);
     if (data?.kind === 'decoration') primary = byId.get(data.nodeId) || primary;
+    if (primary.locked) continue;
     if (readDiagramData(primary)?.kind !== 'decoration' && readDiagramData(primary)) selected.set(primary.id, primary);
   }
   const only = selected.size === 1 ? [...selected.values()][0] : null;
@@ -246,13 +247,17 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (!edge || data?.kind !== 'edge') return;
     const from = elements.find(element => element.id === data.fromId), to = elements.find(element => element.id === data.toId);
     if (!from || !to) return;
-    const settings = { ...settingsOf(edge), ...patch }, fresh = createDiagramEdge(from, to, nativeSettings(settings), styleOf(edge));
+    const settings = { ...settingsOf(edge), ...patch }, fresh = createDiagramEdge(from, to, {
+      ...nativeSettings(settings), fromAnchor: patch.fromSide === undefined ? data.fromAnchor : undefined,
+      toAnchor: patch.toSide === undefined ? data.toAnchor : undefined,
+    }, styleOf(edge));
     const replacement = fresh.find(element => element.type === 'arrow');
     if (!replacement || replacement.type !== 'arrow') return;
     const routeChanged = patch.route !== undefined || patch.fromSide !== undefined || patch.toSide !== undefined;
+    const anchors = readDiagramData(replacement);
     mutateElement(edge, { ...(routeChanged ? { x: replacement.x, y: replacement.y, width: replacement.width, height: replacement.height, points: replacement.points, startBinding: replacement.startBinding, endBinding: replacement.endBinding,
       elbowed: 'elbowed' in replacement && replacement.elbowed, roundness: replacement.roundness, fixedSegments: null } : {}), startArrowhead: replacement.startArrowhead, endArrowhead: replacement.endArrowhead,
-      customData: { ...edge.customData, noteDiagram: { ...data, fromSide: settings.fromSide, toSide: settings.toSide, doubleLine: settings.doubleLine } } });
+      customData: { ...edge.customData, noteDiagram: { ...data, ...(routeChanged && anchors?.kind === 'edge' ? { fromAnchor: anchors.fromAnchor, toAnchor: anchors.toAnchor } : {}), fromSide: settings.fromSide, toSide: settings.toSide, doubleLine: settings.doubleLine } } });
     const decorations = elements.filter(element => { const item = readDiagramData(element); return !element.isDeleted && item?.kind === 'decoration' && item.nodeId === edge.id; });
     if (!settings.doubleLine) for (const element of decorations) mutateElement(element, { isDeleted: true });
     if (settings.doubleLine && !decorations.length) {

@@ -1,6 +1,7 @@
 export type DiagramSystemId = 'chen' | 'crowfoot' | 'relational' | 'process' | 'org' | 'mindmap';
 export type DiagramSide = 'top' | 'right' | 'bottom' | 'left';
 export type DiagramRoute = 'straight' | 'elbow' | 'curved';
+export type DiagramAnchor = [number, number];
 
 export interface DiagramPreset {
   id: string;
@@ -92,6 +93,8 @@ export interface DiagramEdgeData extends DiagramIdentity {
   toId: string;
   fromSide: DiagramSide;
   toSide: DiagramSide;
+  fromAnchor?: DiagramAnchor | null;
+  toAnchor?: DiagramAnchor | null;
 }
 
 export interface DiagramDecorationData extends DiagramIdentity {
@@ -111,6 +114,32 @@ export interface DiagramRect {
   y: number;
   width: number;
   height: number;
+}
+
+export function isDiagramAnchor(value: unknown): value is DiagramAnchor {
+  return Array.isArray(value) && value.length === 2 && value.every(number => typeof number === 'number' && Number.isFinite(number) && number >= 0 && number <= 1);
+}
+export function sideAnchor(side: DiagramSide): DiagramAnchor {
+  return side === 'top' ? [0.5, 0] : side === 'right' ? [1, 0.5] : side === 'bottom' ? [0.5, 1] : [0, 0.5];
+}
+export function anchorSide(anchor: DiagramAnchor): DiagramSide {
+  const distances: [DiagramSide, number][] = [['top', anchor[1]], ['right', 1 - anchor[0]], ['bottom', 1 - anchor[1]], ['left', anchor[0]]];
+  return distances.sort((a, b) => a[1] - b[1])[0][0];
+}
+export function anchorPoint(shape: DiagramRect & { angle?: number }, anchor: DiagramAnchor): [number, number] {
+  const dx = (anchor[0] - 0.5) * shape.width, dy = (anchor[1] - 0.5) * shape.height, angle = shape.angle || 0;
+  return [shape.x + shape.width / 2 + dx * Math.cos(angle) - dy * Math.sin(angle), shape.y + shape.height / 2 + dx * Math.sin(angle) + dy * Math.cos(angle)];
+}
+export function pointAnchor(shape: DiagramRect & { angle?: number }, point: readonly number[]): DiagramAnchor {
+  const dx = point[0] - shape.x - shape.width / 2, dy = point[1] - shape.y - shape.height / 2, angle = -(shape.angle || 0);
+  const clamp = (number: number) => Math.max(0, Math.min(1, number));
+  return [clamp((dx * Math.cos(angle) - dy * Math.sin(angle)) / Math.max(1, shape.width) + 0.5), clamp((dx * Math.sin(angle) + dy * Math.cos(angle)) / Math.max(1, shape.height) + 0.5)];
+}
+/** Keep the same attachment direction on the outline after changing shape type. */
+export function projectAnchor(type: string, anchor: DiagramAnchor): DiagramAnchor {
+  const dx = anchor[0] - 0.5, dy = anchor[1] - 0.5;
+  const radius = type === 'ellipse' ? Math.hypot(dx, dy) : type === 'diamond' ? Math.abs(dx) + Math.abs(dy) : Math.max(Math.abs(dx), Math.abs(dy));
+  return radius < 0.000001 ? [0.5, 0] : [0.5 + dx * 0.5 / radius, 0.5 + dy * 0.5 / radius];
 }
 
 export interface DiagramNodeLike extends DiagramElementLike, DiagramRect {

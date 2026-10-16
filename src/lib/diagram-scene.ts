@@ -1,13 +1,14 @@
 import { convertToExcalidrawElements, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { ExcalidrawElementSkeleton } from '@excalidraw/excalidraw/data/transform';
+import type { AppState } from '@excalidraw/excalidraw/types';
 import type {
   Arrowhead, ExcalidrawArrowElement, ExcalidrawElement, ExcalidrawLinearElement, FixedPoint,
   PointBinding, StrokeStyle,
 } from '@excalidraw/excalidraw/element/types';
 import {
-  readDiagramData, routePoints, sidePoint,
+  readDiagramData, routePoints, anchorPoint, pointAnchor, anchorSide, sideAnchor, isDiagramAnchor, projectAnchor,
   type DiagramDecorationData, type DiagramEdgeData, type DiagramNodeData, type DiagramPreset,
-  type DiagramRoute, type DiagramSide,
+  type DiagramRoute, type DiagramSide, type DiagramAnchor,
 } from './diagram-model';
 
 export interface DiagramStyle {
@@ -24,6 +25,8 @@ export interface DiagramEdgeSettings {
   startArrowhead: Arrowhead | null;
   endArrowhead: Arrowhead | null;
   doubleLine: boolean;
+  fromAnchor?: DiagramAnchor | null;
+  toAnchor?: DiagramAnchor | null;
 }
 
 type Point = [number, number];
@@ -51,19 +54,15 @@ function rotate(point: Point, center: Point, angle: number): Point {
   return [center[0] + x * Math.cos(angle) - y * Math.sin(angle), center[1] + x * Math.sin(angle) + y * Math.cos(angle)];
 }
 
-function connectionPoint(element: ExcalidrawElement, side: DiagramSide): Point {
-  return rotate(sidePoint(element, side), [element.x + element.width / 2, element.y + element.height / 2], element.angle);
-}
-
 function worldPoints(element: ExcalidrawLinearElement): Point[] {
   const xs = element.points.map((point) => point[0]), ys = element.points.map((point) => point[1]);
   const center: Point = [element.x + (Math.min(...xs) + Math.max(...xs)) / 2, element.y + (Math.min(...ys) + Math.max(...ys)) / 2];
   return element.points.map((point) => rotate([element.x + point[0], element.y + point[1]], center, element.angle));
 }
 
-function binding(id: string, side: DiagramSide, elbowed: boolean): PointBinding & { fixedPoint?: FixedPoint } {
-  const fixed: Record<DiagramSide, FixedPoint> = { top: [0.5001, 0], right: [1, 0.5001], bottom: [0.5001, 1], left: [0, 0.5001] };
-  return { elementId: id, focus: 0, gap: 0, ...(elbowed ? { fixedPoint: fixed[side] } : {}) };
+function binding(id: string, side: DiagramSide, elbowed: boolean, anchor = sideAnchor(side)): PointBinding & { fixedPoint?: FixedPoint } {
+  const fixed = anchor.map(value => Math.abs(value - 0.5) < 0.0001 ? 0.5001 : value) as FixedPoint;
+  return { elementId: id, focus: 0, gap: 0, ...(elbowed ? { fixedPoint: fixed } : {}) };
 }
 
 function decorationData(data: DiagramNodeData | DiagramEdgeData, nodeId: string): DiagramDecorationData {
@@ -124,6 +123,21 @@ export function changeDiagramNodeShape(elements: readonly ExcalidrawElement[], n
   const result = elements.map(element => {
     if (element.id === node.id) return replacement;
     const meta = readDiagramData(element);
+    if (node.type !== preset.type && !element.isDeleted && element.type === 'arrow' && meta?.kind === 'edge' && (meta.fromId === node.id || meta.toId === node.id)) {
+      const next = { ...meta };
+      let startBinding = element.startBinding, endBinding = element.endBinding;
+      for (const end of ['from', 'to'] as const) {
+        const id = end === 'from' ? 'fromId' : 'toId', key = end === 'from' ? 'fromAnchor' : 'toAnchor', side = end === 'from' ? 'fromSide' : 'toSide';
+        if (meta[id] !== node.id || meta[key] === null) continue;
+        const anchor = projectAnchor(preset.type, isDiagramAnchor(meta[key]) ? meta[key] as DiagramAnchor : sideAnchor(meta[side]));
+        next[key] = anchor; next[side] = anchorSide(anchor);
+        if ('elbowed' in element && element.elbowed) {
+          const bound = binding(node.id, next[side], true, anchor);
+          if (end === 'from') startBinding = bound; else endBinding = bound;
+        }
+      }
+      return newElementWith(element, { startBinding, endBinding, customData: { ...element.customData, noteDiagram: next } });
+    }
     if (element.id === text?.id && element.type === 'text' && measuredText?.type === 'text') {
       return newElementWith(element, { x: measuredText.x, y: measuredText.y, width: measuredText.width, height: measuredText.height, text: measuredText.text, groupIds });
     }
@@ -171,14 +185,21 @@ export function createDiagramEdge(
   if (fromData?.kind !== 'node' || toData?.kind !== 'node') throw new Error('Connections need two diagram shapes.');
   if (fromData.diagramId !== toData.diagramId) throw new Error('Connect shapes in the same diagram.');
   const points = routePoints(from, to, settings.fromSide, settings.toSide, settings.route);
-  points[0] = connectionPoint(from, settings.fromSide);
-  points[points.length - 1] = connectionPoint(to, settings.toSide);
+  const fromAnchor = isDiagramAnchor(settings.fromAnchor) ? settings.fromAnchor : sideAnchor(settings.fromSide);
+  const toAnchor = isDiagramAnchor(settings.toAnchor) ? settings.toAnchor : sideAnchor(settings.toSide);
+  points[0] = anchorPoint(from, fromAnchor);
+  points[points.length - 1] = anchorPoint(to, toAnchor);
+  if (points.length > 2) {
+    if (settings.fromSide === 'top' || settings.fromSide === 'bottom') points[1][0] = points[0][0]; else points[1][1] = points[0][1];
+    const last = points.length - 1;
+    if (settings.toSide === 'top' || settings.toSide === 'bottom') points[last - 1][0] = points[last][0]; else points[last - 1][1] = points[last][1];
+  }
   const [x, y] = points[0];
   const relative = points.map((point): Point => [point[0] - x, point[1] - y]);
   const id = crypto.randomUUID(), groupIds = settings.doubleLine ? [crypto.randomUUID()] : [];
   const data: EdgeData = {
     kind: 'edge', diagramId: fromData.diagramId, system: fromData.system, fromId: from.id, toId: to.id,
-    fromSide: settings.fromSide, toSide: settings.toSide, doubleLine: settings.doubleLine,
+    fromSide: settings.fromSide, toSide: settings.toSide, fromAnchor, toAnchor, doubleLine: settings.doubleLine,
   };
   const skeleton = {
     id, type: 'arrow', x, y, points: localPoints(relative), elbowed: settings.route === 'elbow',
@@ -192,8 +213,8 @@ export function createDiagramEdge(
   // Conversion initializes arrows without bindings and can nudge the endpoints by half a pixel.
   mutateElement(arrow, {
     points: localPoints(relative),
-    startBinding: binding(from.id, settings.fromSide, arrow.elbowed),
-    endBinding: binding(to.id, settings.toSide, arrow.elbowed),
+    startBinding: binding(from.id, settings.fromSide, arrow.elbowed, fromAnchor),
+    endBinding: binding(to.id, settings.toSide, arrow.elbowed, toAnchor),
     startArrowhead: settings.startArrowhead, endArrowhead: settings.endArrowhead,
   }, false);
   if (!settings.doubleLine) return [arrow];
@@ -232,23 +253,57 @@ function updateLineGeometry(element: ExcalidrawLinearElement, points: Point[]): 
 }
 
 /** Repair selected side attachments and dependent decorations without replacing user-edited bends. */
-export function repairDiagramElements(elements: readonly ExcalidrawElement[]): boolean {
+export function repairDiagramElements(elements: readonly ExcalidrawElement[], state?: Pick<AppState, 'editingLinearElement' | 'selectedLinearElement'>): boolean {
   const byId = new Map(elements.map((element) => [element.id, element]));
   let changed = false;
   for (const element of elements) {
-    if (element.isDeleted || element.type !== 'arrow' || ('elbowed' in element && element.elbowed)) continue;
+    if (element.isDeleted || element.type !== 'arrow' || element.points.length < 2) continue;
+    const elbowed = 'elbowed' in element && element.elbowed;
     const data = readDiagramData(element);
     if (data?.kind !== 'edge') continue;
-    const from = byId.get(data.fromId), to = byId.get(data.toId);
-    if (!from || !to || from.isDeleted || to.isDeleted || element.points.length < 2) continue;
     const points = worldPoints(element);
-    points[0] = connectionPoint(from, data.fromSide);
-    points[points.length - 1] = connectionPoint(to, data.toSide);
-    if (updateLineGeometry(element, points)) changed = true;
-    if (element.startBinding?.elementId !== from.id || element.endBinding?.elementId !== to.id) {
-      mutateElement(element, { startBinding: binding(from.id, data.fromSide, false), endBinding: binding(to.id, data.toSide, false) }, false);
-      changed = true;
+    const editor = [state?.editingLinearElement, state?.selectedLinearElement].find(editor => editor?.elementId === element.id);
+    const next = { ...data };
+    let metadataChanged = false;
+    const ends = [
+      { id: 'fromId', side: 'fromSide', anchor: 'fromAnchor', binding: 'startBinding', index: 0 },
+      { id: 'toId', side: 'toSide', anchor: 'toAnchor', binding: 'endBinding', index: points.length - 1 },
+    ] as const;
+    for (const end of ends) {
+      const bound = element[end.binding];
+      const boundNode = bound && byId.get(bound.elementId);
+      const target = boundNode && !boundNode.isDeleted && readDiagramData(boundNode)?.kind === 'node' ? boundNode : byId.get(data[end.id]);
+      if (!target || target.isDeleted) continue;
+      const selectedEndpoint = !!editor?.selectedPointsIndices?.includes(end.index);
+      let anchor = data[end.anchor];
+      const fixed = bound && 'fixedPoint' in bound && Array.isArray(bound.fixedPoint) && bound.fixedPoint.length === 2 && bound.fixedPoint.every(Number.isFinite)
+        ? bound.fixedPoint.map(value => Math.abs(value - 0.5) < 0.00011 ? 0.5 : Math.max(0, Math.min(1, value))) as DiagramAnchor : null;
+      if (bound && target.id === bound.elementId && (elbowed || selectedEndpoint || target.id !== data[end.id] || anchor === null)) {
+        anchor = elbowed && fixed ? fixed : pointAnchor(target, points[end.index]);
+      } else if (anchor === undefined || (anchor !== null && !isDiagramAnchor(anchor))) {
+        // Preserve the saved geometry when upgrading an existing connector.
+        anchor = fixed || (bound?.elementId === target.id ? pointAnchor(target, points[end.index]) : sideAnchor(data[end.side]));
+      } else if (!bound && !editor?.isDragging) {
+        // A user can deliberately detach an endpoint. Do not snap it back.
+        anchor = null;
+      }
+      if (isDiagramAnchor(anchor)) {
+        const side = anchorSide(anchor);
+        if (next[end.id] !== target.id || next[end.side] !== side || !isDiagramAnchor(data[end.anchor]) || !anchor.every((value, index) => Math.abs(value - (data[end.anchor] as DiagramAnchor)[index]) < 0.000001)) metadataChanged = true;
+        next[end.id] = target.id; next[end.side] = side; next[end.anchor] = anchor;
+        if (!editor?.isDragging && !selectedEndpoint && !elbowed) points[end.index] = anchorPoint(target, anchor);
+        if (bound?.elementId !== target.id && !editor?.isDragging) {
+          mutateElement(element, { [end.binding]: binding(target.id, side, !!elbowed, anchor) }, false); changed = true;
+        }
+        if (!target.boundElements?.some(bound => bound.type === 'arrow' && bound.id === element.id)) {
+          mutateElement(target, { boundElements: [...(target.boundElements || []), { id: element.id, type: 'arrow' }] }, false); changed = true;
+        }
+      } else if (anchor === null && data[end.anchor] !== null) {
+        next[end.anchor] = null; metadataChanged = true;
+      }
     }
+    if (!editor?.isDragging && !elbowed && updateLineGeometry(element, points)) changed = true;
+    if (metadataChanged) { mutateElement(element, { customData: { ...element.customData, noteDiagram: next } }, false); changed = true; }
   }
   for (const element of elements) {
     if (element.isDeleted) continue;

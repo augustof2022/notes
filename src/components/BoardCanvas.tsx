@@ -11,6 +11,7 @@ import { PenWidthPanel } from './PenWidthPanel';
 import { SnapControls } from './SnapControls';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
+import { LockedObjectsControl } from './LockedObjectsControl';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
 import { db, touch } from '../lib/db';
@@ -90,7 +91,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const selectedPen = elements.find(x => x.type === 'freedraw' && !x.isDeleted && state.selectedElementIds[x.id]);
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
-    let repaired = repairDiagramElements(elements);
+    let repaired = repairDiagramElements(elements, state);
     for (const element of elements) {
       const updates = constantInkUpdates(element);
       if (updates) { mutateElement(element, updates, false); repaired = true; }
@@ -203,6 +204,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       </div>}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && <LockedObjectsControl api={api} root={canvasRoot} />}
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;
 });

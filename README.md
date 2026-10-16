@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.2.3**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
+Current release: **v0.2.4**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
 
 ## What works
 
@@ -46,6 +46,10 @@ The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, a
 4. **Add connection** starts a link to another diagram shape. Choose From and To sides, then tap the target. Connections back to earlier nodes are allowed and do not change parent/child relationships. Escape or Cancel stops placement or connecting.
 5. Select a connection and choose **Line options** for its sides, straight/right-angle/curved route, endpoint symbols, weight, solid/dashed/dotted style, or a double line. **Edit bends** opens point editing for straight/curved connections; drag a middle segment of a right-angle connection to adjust its route. **Label** adds or edits connection text.
 6. Open **Diagrams** with a shape or connection selected to change its colors and lines. A **Diagram theme** colors that connected diagram, leaving other diagrams and ordinary board content alone. Creating a new standalone shape starts a separate diagram; connecting two diagrams joins their theme scope. Exit diagram mode from the palette to hide its quick actions.
+
+Drag a connector endpoint to choose its attachment point. That point stays with the shape when it moves, resizes, or rotates and is saved with the board. Straight, curved, and elbow connections retain these choices. Changing a route keeps the attachment points; choosing a From/To side deliberately moves that endpoint to the chosen side’s center. Endpoints can also be deliberately detached.
+
+When objects are locked, the board controls show **Unlock objects**. Open it to unlock an individual object/group or use **Unlock all objects**. A diagram shape’s locked label and outline unlock with it. You can undo an unlock.
 
 Shapes, text, hierarchy, and connection settings autosave with the board and are included in sync and backups. These are visual diagram templates; there is no database schema generation or strict notation validation.
 

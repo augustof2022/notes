@@ -42,3 +42,9 @@
 .section-heading>div{flex-wrap:wrap;justify-content:flex-end;gap:12px}
 .section-heading button{min-height:36px;white-space:nowrap}
 @media(max-width:560px){.section-heading{flex-wrap:wrap;align-items:flex-start}.section-heading>div{flex:1 1 100%;justify-content:space-between;gap:8px}.section-heading .library-sort>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.library-sort select{font-size:16px;max-width:230px;min-height:44px}.section-heading button{min-height:44px}}
+
+.locked-objects-list{display:grid;gap:8px;max-height:45dvh;overflow:auto}
+.locked-objects-list>div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border:1px solid var(--line);border-radius:8px}
+.locked-objects-list>div>span{font-size:12px;overflow-wrap:anywhere;min-width:0}
+.locked-objects-list button{flex-shrink:0;min-height:44px}
+.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.locked-objects-trigger{grid-column:1 / -1}
