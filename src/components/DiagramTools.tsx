@@ -51,6 +51,7 @@ function nativeSettings(settings: ConnectionSettings) {
 export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null; onMessage: (text: string) => void }) {
   const existing = api.getSceneElements().map(readDiagramData).find(data => data?.kind === 'node');
   const [enabled, setEnabled] = useState(!!existing);
+  const manuallyExited = useRef(false);
   const [panel, setPanel] = useState(false);
   const [pendingRelation, setPendingRelation] = useState<'child' | 'sibling' | null>(null);
   useLayoutEffect(() => {
@@ -69,6 +70,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [pointer, setPointer] = useState<[number, number] | null>(null);
   const [host, setHost] = useState<Element | null>(null);
+  const [mobileActionSlot, setMobileActionSlot] = useState<HTMLDivElement | null>(null);
   const activeDiagram = useRef<string | null>(existing?.diagramId || null);
   const [snapshot, setSnapshot] = useState<{ elements: readonly ExcalidrawElement[]; state: AppState; key: string }>(() => ({ elements: api.getSceneElements(), state: api.getAppState(), key: '' }));
   const selection = selectedDiagram(snapshot.elements, snapshot.state);
@@ -76,6 +78,25 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const live = useRef({ placing, sourceId, connection, system, presetId, baseStyle });
   live.current = { placing, sourceId, connection, system, presetId, baseStyle };
   useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
+  useLayoutEffect(() => {
+    if (!root) return;
+    let target: Element | null = null, slot: HTMLDivElement | null = null;
+    const locate = () => {
+      // Follow the panel actually rendered by the editor. Its openMenu flag
+      // can remain set on desktop, where no covering mobile panel exists.
+      const next = root.querySelector('.excalidraw--mobile .App-mobile-menu .panelColumn');
+      if (target === next) return;
+      slot?.remove(); target = next;
+      if (target) {
+        slot = document.createElement('div');
+        target.prepend(slot); setMobileActionSlot(slot);
+      } else { slot = null; setMobileActionSlot(null); }
+    };
+    locate();
+    const observer = new MutationObserver(locate);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => { observer.disconnect(); slot?.remove(); };
+  }, [root]);
   useEffect(() => api.onChange((elements, state) => {
     const key = `${Object.keys(state.selectedElementIds).join(',')}:${elements.map(element => `${element.id}:${element.version}`).join('|')}:${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.width}:${state.height}:${state.editingTextElement?.id || ''}:${state.cursorButton}:${state.openMenu || ''}`;
     setSnapshot(previous => previous.key === key ? previous : { elements, state, key });
@@ -84,6 +105,10 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (!chosen) return;
     const data = readDiagramData(chosen);
     if (!data) return;
+    // Saved scenes can finish loading after this component initializes.
+    // Selecting a diagram item should activate its actions unless the user
+    // explicitly exited diagram mode during this board session.
+    if (!manuallyExited.current) setEnabled(true);
     activeDiagram.current = data.diagramId;
     setSystem(data.system);
     if (data.system !== system) setConnection(defaults(data.system));
@@ -112,7 +137,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   function editLabel(element: ExcalidrawElement) {
     flushSync(() => {
       setPanel(false);
-      api.updateScene({ appState: { selectedElementIds: { [element.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
+      api.updateScene({ appState: { selectedElementIds: { [element.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
     });
     const editor = root?.querySelector<HTMLElement>('.excalidraw');
     editor?.focus();
@@ -124,7 +149,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     flushSync(() => {
       setPanel(false); setPendingRelation(null); setPlacing(false); setSourceId(null); setPointer(null);
       api.setActiveTool({ type: 'selection' });
-      api.updateScene({ elements: [...elements, ...added], appState: { selectedElementIds: { [selectedId]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      api.updateScene({ elements: [...elements, ...added], appState: { selectedElementIds: { [selectedId]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     });
     api.resetCursor();
     const node = api.getSceneElements().find(element => element.id === selectedId);
@@ -157,6 +182,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
     if (!node) return;
     setPanel(false); setPlacing(false); setSourceId(node.id); setPointer(null);
+    api.updateScene({ appState: { openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
     api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair');
   }
   function cancelOperation() {
@@ -254,7 +280,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   function editBends() {
     const edge = selectedDiagram(api.getSceneElements(), api.getAppState()).edge;
     if (!edge) return;
-    flushSync(() => { api.updateScene({ appState: { selectedElementIds: { [edge.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER }); });
+    flushSync(() => { api.updateScene({ appState: { selectedElementIds: { [edge.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER }); });
     const editor = root?.querySelector<HTMLElement>('.excalidraw'); editor?.focus();
     if (edge.elbowed) onMessage('Drag a connection segment to add a bend or change its route.');
     else editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
@@ -271,12 +297,14 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const selectedData = selection.node && readDiagramData(selection.node);
   const selectedStyle = chosen ? styleOf(chosen) : baseStyle;
   const selectedConnection = selection.edge ? settingsOf(selection.edge) : connection;
+  const showActions = enabled && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
+  const actions = selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
+    : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>;
+  const actionLabel = selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions';
   return <>
-    {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
-    {enabled && !panel && !placing && !sourceId && chosen && actionPosition && !snapshot.state.openMenu && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions'}>
-      {selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
-        : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>}
-    </div>}
+    {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { manuallyExited.current = false; setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
+    {showActions && (mobileActionSlot ? createPortal(<div className="diagram-inline-actions" role="group" aria-label={actionLabel}>{actions}</div>, mobileActionSlot)
+      : actionPosition && snapshot.state.openMenu !== 'canvas' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={actionLabel}>{actions}</div>)}
     {(placing || sourceId) && <div className="diagram-operation" role="status" style={{ top: editorTop + 72 }}>
       <span>{placing ? 'Tap the board to place your shape, then type.' : 'Tap a target shape to connect. Loops back to earlier shapes are allowed.'}</span>
       {sourceId && <><label>From<select aria-label="Connection from side" value={connection.fromSide} onChange={event => setConnection(previous => ({ ...previous, fromSide: event.target.value as ConnectionSettings['fromSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label><label>To<select aria-label="Connection to side" value={connection.toSide} onChange={event => setConnection(previous => ({ ...previous, toSide: event.target.value as ConnectionSettings['toSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label></>}
@@ -287,6 +315,6 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       onAddShape={() => { setPanel(false); setSourceId(null); setPlacing(true); api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair'); }}
       selectedNode={selection.node && selectedData?.kind === 'node' ? { id: selection.node.id, label: labelOf(snapshot.elements, selection.node), shapeId: selectedData.shapeId, parentId: selectedData.parentId } : null} selectedEdge={!!selection.edge}
       onAddSibling={() => chooseRelated('sibling')} onAddChild={() => chooseRelated('child')} onConnect={beginConnection} onEditLabel={() => { if (chosen) editLabel(chosen); }} connecting={!!sourceId} onCancelConnection={cancelOperation}
-      connection={selectedConnection} onConnectionChange={applyConnection} style={selectedStyle} onStyleChange={applyStyle} onTheme={applyTheme} onClose={closePanel} onExit={() => { closePanel(); setEnabled(false); cancelOperation(); }} />}
+      connection={selectedConnection} onConnectionChange={applyConnection} style={selectedStyle} onStyleChange={applyStyle} onTheme={applyTheme} onClose={closePanel} onExit={() => { manuallyExited.current = true; closePanel(); setEnabled(false); cancelOperation(); }} />}
   </>;
 }

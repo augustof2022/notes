@@ -460,3 +460,8 @@
 .diagram-palette-actions{display:flex;flex-wrap:wrap;gap:8px}
 .diagram-palette-actions>.primary-button{flex:1}
 .diagram-panel button:disabled{opacity:.5}
+
+.excalidraw .diagram-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 0 12px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.excalidraw .diagram-inline-actions button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:11px;touch-action:manipulation}
+.excalidraw .diagram-inline-actions button:hover{background:var(--accent-light);color:var(--accent)}
+.board-canvas:has(.excalidraw--mobile .App-mobile-menu)>.diagram-quick-actions{display:none}
