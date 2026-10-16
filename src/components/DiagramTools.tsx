@@ -77,7 +77,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   live.current = { placing, sourceId, connection, system, presetId, baseStyle };
   useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
   useEffect(() => api.onChange((elements, state) => {
-    const key = `${Object.keys(state.selectedElementIds).join(',')}:${elements.map(element => `${element.id}:${element.version}`).join('|')}:${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.width}:${state.height}:${state.editingTextElement?.id || ''}:${state.cursorButton}`;
+    const key = `${Object.keys(state.selectedElementIds).join(',')}:${elements.map(element => `${element.id}:${element.version}`).join('|')}:${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.width}:${state.height}:${state.editingTextElement?.id || ''}:${state.cursorButton}:${state.openMenu || ''}`;
     setSnapshot(previous => previous.key === key ? previous : { elements, state, key });
   }), [api]);
   useEffect(() => {
@@ -273,7 +273,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const selectedConnection = selection.edge ? settingsOf(selection.edge) : connection;
   return <>
     {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
-    {enabled && !panel && !placing && !sourceId && chosen && actionPosition && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions'}>
+    {enabled && !panel && !placing && !sourceId && chosen && actionPosition && !snapshot.state.openMenu && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions'}>
       {selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
         : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>}
     </div>}

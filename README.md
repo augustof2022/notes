@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.2.0**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
+Current release: **v0.2.1**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
 
 ## What works
 
@@ -42,7 +42,7 @@ The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, a
 
 1. Open a board and choose **Diagrams**. Select a diagram system and a shape, then choose **Add** and tap the board to place it. Text editing opens immediately; type the label and click outside or press Escape to finish. Table names and column/key lists are editable text.
 2. Select a diagram shape to show its four quick actions. **Add child** creates a connected node below that shape. **Add sibling** creates another node beside it with the same parent; its connection goes to that shared parent. Adding a sibling to a root creates another root. New nodes avoid existing diagram shapes, and the view pans to keep a new node visible.
-3. **Edit shape** opens the palette for a selected node. Pick a shape from the same diagram system and choose **Apply … to selected shape** to keep the node’s text, colors, hierarchy, and connections. **Add child** and **Add sibling** first offer that system’s shapes when more than one is available, then add the chosen shape. Systems with one shape add it directly. **Add new …** places a separate diagram. Canvas object menus are hidden while the palette is open, including on mobile.
+3. **Edit shape** opens the palette for a selected node. Pick a shape from the same diagram system and choose **Apply … to selected shape** to keep the node’s text, colors, hierarchy, and connections. **Add child** and **Add sibling** first offer that system’s shapes when more than one is available, then add the chosen shape. Systems with one shape add it directly. **Add new …** places a separate diagram. Canvas object menus are hidden while the palette is open, including on mobile. Floating diagram actions also hide while the built-in mobile Edit panel is open and return when it closes.
 4. **Add connection** starts a link to another diagram shape. Choose From and To sides, then tap the target. Connections back to earlier nodes are allowed and do not change parent/child relationships. Escape or Cancel stops placement or connecting.
 5. Select a connection and choose **Line options** for its sides, straight/right-angle/curved route, endpoint symbols, weight, solid/dashed/dotted style, or a double line. **Edit bends** opens point editing for straight/curved connections; drag a middle segment of a right-angle connection to adjust its route. **Label** adds or edits connection text.
 6. Open **Diagrams** with a shape or connection selected to change its colors and lines. A **Diagram theme** colors that connected diagram, leaving other diagrams and ordinary board content alone. Creating a new standalone shape starts a separate diagram; connecting two diagrams joins their theme scope. Exit diagram mode from the palette to hide its quick actions.
