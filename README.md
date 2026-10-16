@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.2.1**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
+Current release: **v0.2.2**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
 
 ## What works
 
@@ -56,10 +56,12 @@ This checkout is already configured for the browser-safe endpoint of your Supaba
 1. Create or select a **free Supabase project**.
 2. Run [`supabase/schema.sql`](supabase/schema.sql) in its SQL Editor. It creates account-isolated folders, boards, asset metadata, optimistic-save RPC, and a private image bucket. It is safe to rerun.
    For existing projects upgrading to v0.2.0, rerun this schema to add stable `created_at` values for folders and boards. New items retain their offline creation date when synced. Earlier releases did not record creation time, so older items use their earliest available saved timestamp; their exact original creation date cannot be recovered. The app remains compatible with the previous schema while you apply the update, but creation dates will not sync consistently between devices until it is applied.
-3. Add the project URL and browser-safe publishable/anon key in the app’s Settings → Cloud sync. Alternatively set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build time.
+3. The deployment owner configures the project URL and browser-safe publishable/anon key in `src/config.ts` or through `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build time. Users only sign in through Settings → Cloud sync; they cannot edit the connection there. Old per-browser connection overrides are ignored.
 4. Set the site URL and redirect allowlist in Supabase Authentication → URL Configuration.
 5. Choose **Continue with Google** after configuring the Google provider below. It creates or signs into your Note account and requests permission to store images in your own Drive. Alternatively choose Use email instead. Your Note account is separate from the Supabase dashboard account.
 6. Sign in on another device to see your cloud boards. Automatic sync runs while the app is open every 20 seconds; Ctrl+S or the header status runs it immediately. Newly pasted images must finish uploading before a board is uploaded.
+
+The publishable/anon key is public by design and remains discoverable in the browser bundle and network requests. Removing it from Settings prevents accidental edits; it does not make it secret. Account authorization and Supabase row-level security protect notes and storage. A secret or service-role key must never be shipped to the browser. Keeping the public key entirely off the client would require a server-mediated architecture, which GitHub Pages alone cannot provide.
 
 Device boards stay separate when signing in. Use Settings → Cloud sync → Copy this device’s boards into my account to migrate them intentionally. Signing out returns to the device workspace.
 

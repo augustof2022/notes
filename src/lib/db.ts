@@ -1,7 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { Asset, Board, Folder, Settings } from '../types';
 import { recordKey } from '../types';
-import { appConfig } from '../config';
 import { DEFAULT_PEN_WIDTH } from './canvas-behavior';
 import { snapState } from './snapping';
 
@@ -21,15 +20,22 @@ class NoteDB extends Dexie {
 }
 export const db = new NoteDB();
 export const settingsDefaults: Settings = {
-  supabaseUrl: import.meta.env.VITE_SUPABASE_URL || appConfig.supabaseUrl,
-  supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY || appConfig.supabaseKey,
   imageStore: 'supabase', ocrEnabled: true, theme: 'light'
 };
+function preferences(value: Partial<Settings> | null): Settings {
+  return {
+    imageStore: value?.imageStore === 'drive' ? 'drive' : 'supabase',
+    ocrEnabled: typeof value?.ocrEnabled === 'boolean' ? value.ocrEnabled : settingsDefaults.ocrEnabled,
+    theme: value?.theme === 'dark' ? 'dark' : 'light',
+  };
+}
 export function getSettings(): Settings {
-  try { const saved = JSON.parse(localStorage.getItem('note-settings') || '{}'); return { ...settingsDefaults, ...saved, supabaseUrl: saved.supabaseUrl || settingsDefaults.supabaseUrl, supabaseKey: saved.supabaseKey || settingsDefaults.supabaseKey }; }
+  // Connection details belong to the deployment, never to editable preferences.
+  // Ignore old browser overrides while preserving the user's other choices.
+  try { return preferences(JSON.parse(localStorage.getItem('note-settings') || '{}')); }
   catch { return settingsDefaults; }
 }
-export function storeSettings(settings: Settings) { localStorage.setItem('note-settings', JSON.stringify(settings)); }
+export function storeSettings(settings: Settings) { localStorage.setItem('note-settings', JSON.stringify(preferences(settings))); }
 export function watchSettings(onChange: (settings: Settings) => void) {
   const changed = (event: StorageEvent) => {
     if (event.storageArea !== localStorage || (event.key !== null && event.key !== 'note-settings')) return;

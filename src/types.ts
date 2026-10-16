@@ -21,7 +21,6 @@ export interface Asset {
   syncError?: string;
 }
 export interface Settings {
-  supabaseUrl: string; supabaseKey: string;
   imageStore: ImageStore; ocrEnabled: boolean; theme: 'light' | 'dark';
 }
 export interface SearchMatch { board: Board; elementId?: string; text: string; kind: 'title' | 'text' | 'image' | 'handwriting' }

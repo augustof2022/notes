@@ -1,14 +1,15 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Settings } from '../types';
+import { appConfig } from '../config';
 import { createAuthStorage } from './auth-storage';
 let cached: SupabaseClient | null = null; let signature = '';
-export function getSupabase(settings: Settings) {
-  if (!settings.supabaseUrl || !settings.supabaseKey) return null;
-  const next = `${settings.supabaseUrl}|${settings.supabaseKey}`;
+export function getSupabase() {
+  if (!appConfig.supabaseUrl || !appConfig.supabaseKey) return null;
+  const next = `${appConfig.supabaseUrl}|${appConfig.supabaseKey}`;
   if (cached && signature === next) return cached;
   if (cached) void cached.auth.stopAutoRefresh();
   signature = next;
-  cached = createClient(settings.supabaseUrl, settings.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: createAuthStorage(localStorage) } });
+  validateCloudSettings(appConfig.supabaseUrl, appConfig.supabaseKey);
+  cached = createClient(appConfig.supabaseUrl, appConfig.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: createAuthStorage(localStorage) } });
   return cached;
 }
 export function validateCloudSettings(url: string, key: string) {

@@ -9,7 +9,7 @@ const upload = vi.hoisted(() => vi.fn());
 vi.mock('./drive', () => ({ uploadDriveImage: upload, downloadDriveImage: vi.fn() }));
 beforeEach(() => { upload.mockReset(); vi.stubGlobal('navigator', { onLine: true }); });
 afterEach(async () => { await Promise.all([db.boards.clear(), db.folders.clear(), db.assets.clear()]); vi.unstubAllGlobals(); });
-const settings = { supabaseUrl: '', supabaseKey: '', imageStore: 'drive' as const, ocrEnabled: true, theme: 'light' as const };
+const settings = { imageStore: 'drive' as const, ocrEnabled: true, theme: 'light' as const };
 function client(metadata = vi.fn().mockResolvedValue({ error: null })) {
   const rpc = vi.fn().mockResolvedValue({ data: { revision: 1, updated_at: '2026-10-11T01:00:00Z' }, error: null });
   const query = { eq: () => query, order: () => query, range: async () => ({ data: [], error: null }) };

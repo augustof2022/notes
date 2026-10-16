@@ -5,6 +5,18 @@ import { getSettings, storeSettings, watchSettings } from './db';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('settings across open Note tabs', () => {
+  it('ignores old connection overrides and retains only personal preferences', () => {
+    const saved = JSON.stringify({ supabaseUrl: 'https://changed.invalid', supabaseKey: 'edited-key', imageStore: 'drive', ocrEnabled: false, theme: 'dark' });
+    vi.stubGlobal('localStorage', { getItem: () => saved });
+    expect(getSettings()).toEqual({ imageStore: 'drive', ocrEnabled: false, theme: 'dark' });
+  });
+  it('does not write connection details back into browser preferences', () => {
+    const setItem = vi.fn();
+    vi.stubGlobal('localStorage', { setItem });
+    const legacy = { supabaseUrl: 'https://changed.invalid', supabaseKey: 'edited-key', imageStore: 'supabase' as const, ocrEnabled: true, theme: 'light' as const };
+    storeSettings(legacy);
+    expect(JSON.parse(setItem.mock.calls[0][1])).toEqual({ imageStore: 'supabase', ocrEnabled: true, theme: 'light' });
+  });
   it('updates an already open tab when another tab selects Google Drive', () => {
     let saved: string | null = null;
     const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
