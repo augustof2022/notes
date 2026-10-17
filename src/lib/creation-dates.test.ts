@@ -20,7 +20,7 @@ function cloud(rows: Record<string, object[]> = {}, saved?: object) {
   return {
     rpc,
     value: { rpc, from: (table: string) => {
-      const query = { eq: () => query, order: () => query, range: async () => ({ data: rows[table] || [], error: null }) };
+      const query = { eq: () => query, in: () => query, order: () => query, range: async () => ({ data: rows[table] || [], error: null }) };
       return { select: () => query };
     } } as unknown as SupabaseClient
   };

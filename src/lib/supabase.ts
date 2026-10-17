@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { appConfig } from '../config';
 import { createAuthStorage } from './auth-storage';
+import { cloudFetch } from './request-timeout';
 let cached: SupabaseClient | null = null; let signature = '';
 export function getSupabase() {
   if (!appConfig.supabaseUrl || !appConfig.supabaseKey) return null;
@@ -9,7 +10,7 @@ export function getSupabase() {
   if (cached) void cached.auth.stopAutoRefresh();
   signature = next;
   validateCloudSettings(appConfig.supabaseUrl, appConfig.supabaseKey);
-  cached = createClient(appConfig.supabaseUrl, appConfig.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: createAuthStorage(localStorage) } });
+  cached = createClient(appConfig.supabaseUrl, appConfig.supabaseKey, { global: { fetch: cloudFetch }, auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: createAuthStorage(localStorage) } });
   return cached;
 }
 export function validateCloudSettings(url: string, key: string) {

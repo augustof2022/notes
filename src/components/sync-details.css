@@ -1,0 +1,15 @@
+.sync-current-status{padding:10px 12px;border-radius:7px;background:var(--accent-light);font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+.sync-times{margin:12px 0;font-size:11px;color:var(--muted)}
+.sync-times>div{display:flex;justify-content:space-between;gap:12px;margin:5px 0}
+.sync-times dd{margin:0;text-align:right}
+.sync-pending-title{font-size:13px;margin:18px 0 8px}
+.sync-pending-list{list-style:none;padding:0;margin:0;max-height:38vh;overflow:auto}
+.sync-pending-list li{padding:10px 0;border-bottom:1px solid var(--line)}
+.sync-pending-list strong{display:flex;align-items:baseline;gap:8px;font-size:12px;overflow-wrap:anywhere}
+.sync-pending-list small{font-size:10px;color:var(--muted);font-weight:400}
+.sync-pending-list p{margin:5px 0 0;font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+.sync-item-error{color:#b45309}
+.topbar .sync-details-trigger{width:28px;min-width:28px;padding:4px}
+.save-status span{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.save-status.sync-attention{color:#b45309}
+.sync-account,.sync-detail{overflow-wrap:anywhere}

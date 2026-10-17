@@ -12,7 +12,7 @@ afterEach(async () => { await Promise.all([db.boards.clear(), db.folders.clear()
 const settings = { imageStore: 'drive' as const, ocrEnabled: true, theme: 'light' as const };
 function client(metadata = vi.fn().mockResolvedValue({ error: null })) {
   const rpc = vi.fn().mockResolvedValue({ data: { revision: 1, updated_at: '2026-10-11T01:00:00Z' }, error: null });
-  const query = { eq: () => query, order: () => query, range: async () => ({ data: [], error: null }) };
+  const query = { eq: () => query, in: () => query, order: () => query, range: async () => ({ data: [], error: null }) };
   return { value: { from: () => ({ upsert: metadata, select: () => query }), rpc } as unknown as SupabaseClient, rpc, metadata };
 }
 async function fixture(dataURL: string | undefined = 'data:image/png;base64,aGk=') {

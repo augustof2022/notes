@@ -23,9 +23,11 @@ import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
 import { downloadAsset } from '../lib/sync';
 import { recordKey } from '../types';
+import { sceneSignature } from '../lib/canvas-signature';
 
 export interface CanvasHandle {
   flush: () => Promise<void>;
+  hasPendingChanges: (key: string) => boolean;
   exportPng: () => Promise<Blob | null>;
   jumpTo: (elementId: string) => void;
   reloadImages: () => Promise<void>;
@@ -37,10 +39,8 @@ function cleanAppState(state: AppState): Board['appState'] {
     currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemFontSize: state.currentItemFontSize,
     gridStep: state.gridStep, ...restoreSnapping(state) };
 }
-function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<AppState>) {
-  return `${elements.map(x => `${x.id}:${x.version}:${x.isDeleted}`).join('|')}:${JSON.stringify(state)}`;
-}
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
+  const [ready, setReady] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const chrome = useRef<BoardChromeHandle>(null);
@@ -58,6 +58,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Board['appState']; files: BinaryFiles } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saving = useRef(Promise.resolve());
+  const savesInFlight = useRef(0);
   const booted = useRef(false);
   useEffect(() => {
     if (canvasRoot && api) return installLockedPan(canvasRoot, api, () => !!viewLock.current);
@@ -80,13 +81,14 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (timer.current) clearTimeout(timer.current);
     const snapshot = pending.current; pending.current = null;
     if (snapshot) {
+      savesInFlight.current++;
       saving.current = saving.current.catch(() => {}).then(async () => {
         const assets = await storeSceneFiles(board.scope, snapshot.files, latest.current.settings.ocrEnabled);
         await db.boards.update(board.key, { elements: snapshot.elements, appState: snapshot.state,
           assetIds: [...new Set(snapshot.elements.filter(x => x.type === 'image' && !x.isDeleted).map(x => x.type === 'image' ? x.fileId : null).filter((x): x is NonNullable<typeof x> => !!x))], ...touch() });
         for (const asset of assets) if (latest.current.settings.ocrEnabled) queueOcr(asset);
         latest.current.onSaved();
-      }).catch(error => { pending.current ||= snapshot; latest.current.onMessage(`Could not save: ${error instanceof Error ? error.message : 'device storage is unavailable'}. Export your board before closing.`); throw error; });
+      }).catch(error => { pending.current ||= snapshot; latest.current.onMessage(`Could not save: ${error instanceof Error ? error.message : 'device storage is unavailable'}. Export your board before closing.`); throw error; }).finally(() => { savesInFlight.current--; });
     }
     await saving.current;
   }
@@ -112,7 +114,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     } finally { correcting.current = false; }
     const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean);
     setEmpty(!elements.some(x => !x.isDeleted));
-    if (!booted.current) { booted.current = true; if (!repaired) { lastSignature.current = signature; return; } }
+    if (!booted.current) { booted.current = true; setReady(true); if (!repaired) { lastSignature.current = signature; return; } }
     if (lastSignature.current === signature) return;
     lastSignature.current = signature;
     // Copy now: canvas file maps and app state can mutate during a delayed save.
@@ -140,7 +142,12 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   function changeSnapping(mode: SnapMode, size = api?.getAppState().gridSize) {
     api?.updateScene({ appState: snapState(mode, size), captureUpdate: CaptureUpdateAction.NEVER });
   }
-  useImperativeHandle(ref, () => ({ flush, jumpTo,
+  function hasPendingChanges(key: string) {
+    if (key !== board.key) return false;
+    const state = api?.getAppState();
+    return !booted.current || !!pending.current || savesInFlight.current > 0 || !!state?.editingTextElement || state?.cursorButton === 'down' || !!state?.isResizing;
+  }
+  useImperativeHandle(ref, () => ({ flush, jumpTo, hasPendingChanges,
     toggleControls: () => chrome.current?.toggle(),
     reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
     exportPng: async () => {
@@ -160,6 +167,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const paste = (event: ClipboardEvent) => {
       const target = document.activeElement;
       if (document.querySelector('.modal-backdrop') || target?.closest('input, textarea, [contenteditable="true"]')) return;
+      if (!booted.current) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       const images = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
       const text = event.clipboardData?.getData('text/plain') || '';
       // Let the editor handle its own structured object clipboard.
@@ -189,20 +197,27 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     return () => document.removeEventListener('paste', paste, true);
   }, [api]);
   useEffect(() => {
-    if (!api || !booted.current || pending.current) return;
-    const signature = sceneSignature(board.elements, board.appState);
-    if (signature === lastSignature.current) return;
-    lastSignature.current = signature;
-    viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
-    api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
-    void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
+    if (!api || hasPendingChanges(board.key)) return;
+    let alive = true;
+    // A save acknowledgement can reach React after a newer local write. Check
+    // the current device record before applying that older render's snapshot.
+    void db.boards.get(board.key).then(current => {
+      if (!alive || !current || current.dirty || current.remoteRevision !== board.remoteRevision || hasPendingChanges(board.key)) return;
+      const signature = sceneSignature(board.elements, board.appState);
+      if (sceneSignature(current.elements, current.appState) !== signature || signature === lastSignature.current) return;
+      lastSignature.current = signature;
+      viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
+      api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
+      void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
+    }).catch(error => onMessage(String(error)));
+    return () => { alive = false; };
   }, [board.remoteRevision]);
-  return <div className="board-canvas" ref={setCanvasRoot}>
-    {!api && <div className="canvas-loading"><Loader2 className="spinning" size={24} /> Opening your board…</div>}
+  return <div className="board-canvas" ref={setCanvasRoot} aria-busy={!ready} onKeyDownCapture={event => { if (!ready && event.key !== 'Tab') { event.preventDefault(); event.stopPropagation(); } }}>
+    {!ready && <div className="canvas-loading"><Loader2 className="spinning" size={24} /> Opening your board…</div>}
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
-    {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
-    {api && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
+    {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
+    {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
       { id: 'stamps', title: 'Icon stamps' },
       { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
@@ -213,11 +228,11 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       { id: 'grid', title: 'Grid size', content: <SnapControls controls="size" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
       { id: 'diagrams', title: 'Diagrams' }, { id: 'unlock', title: 'Unlock objects' },
     ]} />}
-    {api && <DrawingToolbar api={api} root={canvasRoot} />}
+    {api && ready && <DrawingToolbar api={api} root={canvasRoot} />}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
-    {api && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
-    {api && <LockedObjectsControl api={api} root={canvasRoot} />}
-    {api && <IconStamps api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
+    {api && ready && <IconStamps api={api} root={canvasRoot} onMessage={onMessage} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;

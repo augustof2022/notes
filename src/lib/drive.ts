@@ -1,4 +1,5 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
+import { cloudFetch } from './request-timeout';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 let accessToken = ''; let expiresAt = 0; let folderId = ''; let ownerId = '';
@@ -27,9 +28,9 @@ export async function useGoogleDriveSession(session: Session | null): Promise<bo
   disconnectDrive(); checking = token; checkingOwner = session.user.id; const checkGeneration = generation;
   try {
     const headers = { Authorization: `Bearer ${token}` };
-    const profile = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers });
+    const profile = await cloudFetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers });
     if (!profile.ok || (await profile.json()).sub !== subject) throw new Error('Reconnect Drive using the Google account you used to sign in to Note.');
-    const permission = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', { headers });
+    const permission = await cloudFetch('https://www.googleapis.com/drive/v3/about?fields=user', { headers });
     if (!permission.ok) throw new Error('Google Drive permission is needed to sync images. Reconnect Drive and allow access to files created by Note.');
     if (generation !== checkGeneration) return false;
     accessToken = token; ownerId = session.user.id; folderId = '';
@@ -46,7 +47,7 @@ async function driveFetch(path: string, owner: string, init?: RequestInit) {
   if (!driveConnected(owner)) throw new Error('Reconnect Google Drive to sync your images. Your local copy is safe.');
   const requestGeneration = generation;
   const headers = new Headers(init?.headers); headers.set('Authorization', `Bearer ${accessToken}`);
-  const response = await fetch(`https://www.googleapis.com/${path}`, { ...init, headers });
+  const response = await cloudFetch(`https://www.googleapis.com/${path}`, { ...init, headers });
   if (requestGeneration !== generation || owner !== ownerId) throw new Error('The Drive account changed. Retry in the current workspace.');
   if (!response.ok) {
     if (response.status === 401) disconnectDrive();

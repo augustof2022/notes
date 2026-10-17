@@ -19,10 +19,24 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.5.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.5.1</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.0</span></h2><span class="release-status">Latest</span></div>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.1</span></h2><span class="release-status">Latest</span></div>
         <p class="updated"><time datetime="2026-10-17">October 17, 2026</time></p>
+        <h3>Faster sync with clear pending details</h3>
+        <ul>
+          <li><strong>Know what is waiting.</strong> Use the question mark beside sync to see pending boards, folders, and images, their names, specific errors, and the last cloud check and completed sync. Failed saves show “Sync needs attention.”</li>
+          <li><strong>Faster across devices.</strong> Changes upload after a short pause in editing. Open devices check every 15 seconds and refresh when you return to the app or reconnect. Revision checks avoid downloading unchanged boards on every poll.</li>
+          <li><strong>Reliable manual sync.</strong> Flush the open board before uploading. A second request during an upload queues a fresh pass that includes newer edits.</li>
+          <li><strong>One blocked item does not stop the rest.</strong> Continue uploading unrelated boards and receiving cloud changes when a board, folder, or image fails. Each blocked item keeps its error for retry.</li>
+          <li><strong>Uploaded images can publish sooner.</strong> Searchable-text updates no longer block a board whose image file and cloud location are already saved. Recover an existing cloud image location instead of uploading it twice.</li>
+          <li><strong>Avoid false pending changes.</strong> Reordered cloud settings no longer count as new edits, and independent element edits with the same version number are recognized.</li>
+          <li><strong>Keep edits safe.</strong> Keep the editor covered until its board loads and defer cloud refreshes while local edits are being saved. Preserve edits made during a request, recognize an already completed retry, keep genuine conflict copies, count pending Trash changes, and time out stalled cloud requests.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.5.0</strong><span>Arrange your board toolbars</span></summary>
+        <p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Arrange your board toolbars</h3>
         <ul>
           <li><strong>Move and resize.</strong> Drag the grip to position Board actions or Drawing tools. Drag the right edge to change its width, or use the width slider in ⋮ More. Keyboard arrow keys work on the grip and resize handle too.</li>
@@ -31,8 +45,7 @@
           <li><strong>Remembered on this browser.</strong> Positions, widths, labels, and order persist across boards. Layouts stay within the board when screen size changes. Reset a toolbar from ⋮ More, or reset both layouts from the header’s Toolbars menu.</li>
           <li><strong>Clear editing space.</strong> The two floating bars stay out of the way while a mobile object palette, board menu, or editor dialog is open.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.4.1</strong><span>Minimize each toolbar individually</span></summary>        <p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Minimize each toolbar individually</h3>
         <ul>

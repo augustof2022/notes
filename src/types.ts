@@ -5,7 +5,7 @@ export type ImageStore = 'supabase' | 'drive';
 export interface RecordBase {
   key: string; id: string; scope: string; name: string;
   createdAt?: string; createdAtEstimated?: boolean;
-  updatedAt: string; deleted: boolean; dirty: boolean; remoteRevision: number;
+  updatedAt: string; deleted: boolean; dirty: boolean; remoteRevision: number; syncError?: string;
 }
 export interface Folder extends RecordBase { parentId: string | null; color: string }
 export interface Board extends RecordBase {
@@ -19,6 +19,7 @@ export interface Asset {
   remotePath: string | null; ocrText: string; ocrStatus: 'pending' | 'done' | 'failed';
   dirty: boolean;
   ocrVersion?: number;
+  metadataSaved?: boolean;
   syncError?: string;
 }
 export interface Settings {
