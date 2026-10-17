@@ -1,5 +1,6 @@
 import { cp, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import './check-version.mjs';
 const dest = join(process.cwd(), 'public');
 await mkdir(join(dest, 'excalidraw'), { recursive: true });
 await cp('node_modules/@excalidraw/excalidraw/dist/prod/fonts', join(dest, 'excalidraw/fonts'), { recursive: true });

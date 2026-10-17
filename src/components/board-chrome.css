@@ -1,0 +1,41 @@
+.board-chrome-options{display:grid;gap:10px}
+.board-chrome-options label{display:flex;flex-direction:row;align-items:center;gap:12px;margin:0;padding:13px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.board-chrome-options input{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
+.board-chrome-options strong{display:block;font-size:12px;font-weight:550}
+.board-chrome-options small{display:block;font-size:10px;font-weight:400;line-height:1.7;color:var(--muted);margin-top:4px}
+.board-chrome-presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+
+/* Keep visibility scoped to this editor. The restore control lives in the header. */
+.board-canvas[data-chrome-actions="false"]>.canvas-tools,
+.board-canvas[data-chrome-actions="false"]>.diagram-quick-actions,
+.board-canvas[data-chrome-actions="false"] .diagram-inline-actions{display:none!important}
+
+/* On desktop, the drawing toolbar also contains navigation buttons. Preserve
+   those buttons when only drawing tools are hidden. Mobile has separate groups. */
+.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar label.ToolIcon:has(input[data-testid^="toolbar-"]:not([data-testid="toolbar-hand"])),
+.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__extra-tools-trigger,
+.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__extra-tools-dropdown,
+.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__divider,
+.board-canvas[data-chrome-drawing="false"] .excalidraw .HintViewer,
+.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar--mobile{display:none!important}
+
+.board-canvas[data-chrome-navigation="false"] .excalidraw .mobile-misc-tools-container,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .default-sidebar-trigger,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .layer-ui__library,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .sidebar,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .ToolIcon__lock,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .ToolIcon__penMode,
+.board-canvas[data-chrome-navigation="false"] .excalidraw label.ToolIcon:has(input[data-testid="toolbar-hand"]),
+.board-canvas[data-chrome-navigation="false"] .excalidraw .zoom-actions,
+.board-canvas[data-chrome-navigation="false"] .excalidraw .scroll-back-to-content{display:none!important}
+
+.board-canvas[data-chrome-editing="false"] .excalidraw .App-menu_top__left,
+.board-canvas[data-chrome-editing="false"] .excalidraw .selected-shape-actions,
+.board-canvas[data-chrome-editing="false"] .excalidraw .App-bottom-bar,
+.board-canvas[data-chrome-editing="false"] .excalidraw .undo-redo-buttons,
+.board-canvas[data-chrome-editing="false"] .excalidraw .layer-ui__wrapper__footer-right,
+.board-canvas[data-chrome-editing="false"] .excalidraw .dropdown-menu:has(.main-menu-trigger),
+.board-canvas[data-chrome-editing="false"] .note-pen-width-slot{display:none!important}
+
+.board-canvas[data-chrome-drawing="false"][data-chrome-navigation="false"] .excalidraw .shapes-section,
+.board-canvas[data-chrome-drawing="false"][data-chrome-navigation="false"] .excalidraw .App-top-bar{display:none!important}

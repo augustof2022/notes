@@ -9,6 +9,8 @@ create table if not exists public.note_folders (
   deleted boolean not null default false,
   revision bigint not null default 1,
   updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  created_at_estimated boolean not null default false,
   unique (id, owner_id),
   foreign key (parent_id, owner_id) references public.note_folders(id, owner_id),
   check (parent_id is distinct from id)
@@ -24,19 +26,10 @@ create table if not exists public.note_boards (
   deleted boolean not null default false,
   revision bigint not null default 1,
   updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  created_at_estimated boolean not null default false,
   foreign key (folder_id, owner_id) references public.note_folders(id, owner_id)
 );
--- Preserve creation time independently of edits, including on existing installs.
--- Earlier versions only recorded updated_at; use that earliest known value.
-alter table public.note_folders add column if not exists created_at timestamptz;
-alter table public.note_boards add column if not exists created_at timestamptz;
-update public.note_folders set created_at = updated_at where created_at is null;
-update public.note_boards set created_at = updated_at where created_at is null;
-alter table public.note_folders alter column created_at set default now();
-alter table public.note_folders alter column created_at set not null;
-alter table public.note_boards alter column created_at set default now();
-alter table public.note_boards alter column created_at set not null;
-
 create table if not exists public.note_assets (
   owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   id text not null,
@@ -48,6 +41,18 @@ create table if not exists public.note_assets (
   ocr_status text not null default 'done' check (ocr_status in ('pending', 'done', 'failed')),
   primary key (owner_id, id)
 );
+-- Older installations did not store creation times. Preserve their last edit
+-- as an explicitly marked estimate instead of claiming a new/original date.
+-- A prior release backfilled created_at without a provenance flag, so any
+-- existing unflagged date is conservatively an estimate as well.
+alter table public.note_folders add column if not exists created_at timestamptz;
+alter table public.note_folders add column if not exists created_at_estimated boolean;
+alter table public.note_boards add column if not exists created_at timestamptz;
+alter table public.note_boards add column if not exists created_at_estimated boolean;
+update public.note_folders set created_at = coalesce(created_at, updated_at), created_at_estimated = coalesce(created_at_estimated, true) where created_at is null or created_at_estimated is null;
+update public.note_boards set created_at = coalesce(created_at, updated_at), created_at_estimated = coalesce(created_at_estimated, true) where created_at is null or created_at_estimated is null;
+alter table public.note_folders alter column created_at set default now(), alter column created_at set not null, alter column created_at_estimated set default false, alter column created_at_estimated set not null;
+alter table public.note_boards alter column created_at set default now(), alter column created_at set not null, alter column created_at_estimated set default false, alter column created_at_estimated set not null;
 create index if not exists note_folders_owner on public.note_folders(owner_id);
 create index if not exists note_boards_owner on public.note_boards(owner_id);
 alter table public.note_folders enable row level security;
@@ -81,6 +86,23 @@ $$;
 drop trigger if exists note_folder_cycle on public.note_folders;
 create trigger note_folder_cycle before insert or update of parent_id on public.note_folders for each row execute function public.check_note_folder_cycle();
 
+create or replace function public.keep_note_creation()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+begin
+  -- A device that retained the real time may repair a migration estimate once.
+  -- After that, ordinary edits and later metadata cannot rewrite creation.
+  if not (old.created_at_estimated and not new.created_at_estimated) then
+    new.created_at := old.created_at;
+    new.created_at_estimated := old.created_at_estimated;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists note_folder_creation on public.note_folders;
+create trigger note_folder_creation before update on public.note_folders for each row execute function public.keep_note_creation();
+drop trigger if exists note_board_creation on public.note_boards;
+create trigger note_board_creation before update on public.note_boards for each row execute function public.keep_note_creation();
+
 create or replace function public.save_note(p_kind text, p_record jsonb, p_expected_revision bigint)
 returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare result jsonb; uid uuid := auth.uid();
@@ -88,20 +110,24 @@ begin
   if uid is null then raise exception 'Sign in before syncing.'; end if;
   if p_kind = 'folder' then
     if p_expected_revision = 0 then
-      insert into public.note_folders(id, owner_id, name, parent_id, color, deleted, created_at)
-      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'parent_id')::uuid, p_record->>'color', coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()))
+      insert into public.note_folders(id, owner_id, name, parent_id, color, deleted, created_at, created_at_estimated)
+      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'parent_id')::uuid, p_record->>'color', coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()), coalesce((p_record->>'created_at_estimated')::boolean, false))
       on conflict (id) do nothing returning to_jsonb(note_folders.*) into result;
     else
-      update public.note_folders set name = p_record->>'name', parent_id = (p_record->>'parent_id')::uuid, color = p_record->>'color', deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now()
+      update public.note_folders set name = p_record->>'name', parent_id = (p_record->>'parent_id')::uuid, color = p_record->>'color', deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now(),
+        created_at = case when created_at_estimated and p_record->>'created_at' is not null and p_record->>'created_at_estimated' = 'false' then (p_record->>'created_at')::timestamptz else created_at end,
+        created_at_estimated = case when p_record->>'created_at' is not null and p_record->>'created_at_estimated' = 'false' then false else created_at_estimated end
       where id = (p_record->>'id')::uuid and owner_id = uid and revision = p_expected_revision returning to_jsonb(note_folders.*) into result;
     end if;
   elsif p_kind = 'board' then
     if p_expected_revision = 0 then
-      insert into public.note_boards(id, owner_id, name, folder_id, elements, app_state, asset_ids, deleted, created_at)
-      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'folder_id')::uuid, p_record->'elements', p_record->'app_state', array(select jsonb_array_elements_text(p_record->'asset_ids')), coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()))
+      insert into public.note_boards(id, owner_id, name, folder_id, elements, app_state, asset_ids, deleted, created_at, created_at_estimated)
+      values ((p_record->>'id')::uuid, uid, p_record->>'name', (p_record->>'folder_id')::uuid, p_record->'elements', p_record->'app_state', array(select jsonb_array_elements_text(p_record->'asset_ids')), coalesce((p_record->>'deleted')::boolean, false), coalesce((p_record->>'created_at')::timestamptz, now()), coalesce((p_record->>'created_at_estimated')::boolean, false))
       on conflict (id) do nothing returning to_jsonb(note_boards.*) into result;
     else
-      update public.note_boards set name = p_record->>'name', folder_id = (p_record->>'folder_id')::uuid, elements = p_record->'elements', app_state = p_record->'app_state', asset_ids = array(select jsonb_array_elements_text(p_record->'asset_ids')), deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now()
+      update public.note_boards set name = p_record->>'name', folder_id = (p_record->>'folder_id')::uuid, elements = p_record->'elements', app_state = p_record->'app_state', asset_ids = array(select jsonb_array_elements_text(p_record->'asset_ids')), deleted = coalesce((p_record->>'deleted')::boolean, false), revision = revision + 1, updated_at = now(),
+        created_at = case when created_at_estimated and p_record->>'created_at' is not null and p_record->>'created_at_estimated' = 'false' then (p_record->>'created_at')::timestamptz else created_at end,
+        created_at_estimated = case when p_record->>'created_at' is not null and p_record->>'created_at_estimated' = 'false' then false else created_at_estimated end
       where id = (p_record->>'id')::uuid and owner_id = uid and revision = p_expected_revision returning to_jsonb(note_boards.*) into result;
     end if;
   else raise exception 'Unknown record type.';

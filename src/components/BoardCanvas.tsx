@@ -12,6 +12,7 @@ import { SnapControls } from './SnapControls';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
+import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
 import { db, touch } from '../lib/db';
@@ -25,6 +26,7 @@ export interface CanvasHandle {
   exportPng: () => Promise<Blob | null>;
   jumpTo: (elementId: string) => void;
   reloadImages: () => Promise<void>;
+  toggleControls: () => void;
 }
 function cleanAppState(state: AppState): Board['appState'] {
   return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
@@ -38,6 +40,7 @@ function sceneSignature(elements: readonly ExcalidrawElement[], state: Partial<A
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
+  const chrome = useRef<BoardChromeHandle>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
   const [snapping, setSnapping] = useState(() => restoreSnapping(board.appState));
@@ -135,6 +138,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     api?.updateScene({ appState: snapState(mode, size), captureUpdate: CaptureUpdateAction.NEVER });
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo,
+    toggleControls: () => chrome.current?.toggle(),
     reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
     exportPng: async () => {
       await flush(); if (!api || !api.getSceneElements().length) return null;
@@ -205,6 +209,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && <LockedObjectsControl api={api} root={canvasRoot} />}
+    <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;
 });

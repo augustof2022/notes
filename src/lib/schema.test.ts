@@ -5,6 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 let pg: PGlite;
 const userA = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const userB = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
+const legacyUser = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const legacyFolder = '77777777-7777-4777-8777-777777777777';
+const legacyBoard = '88888888-8888-4888-8888-888888888888';
+const originalCreation = '2026-09-10T04:00:00.000Z';
 const parent = '11111111-1111-4111-8111-111111111111';
 const child = '22222222-2222-4222-8222-222222222222';
 const board = '33333333-3333-4333-8333-333333333333';
@@ -31,9 +35,18 @@ beforeAll(async () => {
     alter table storage.objects enable row level security;
     grant select, insert, update on storage.objects to authenticated;
     create function storage.foldername(name text) returns text[] language sql immutable as $$ select string_to_array(name, '/') $$;
-    insert into auth.users values ('${userA}'), ('${userB}');
+    insert into auth.users values ('${userA}'), ('${userB}'), ('${legacyUser}');
   `);
   const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8');
+  // Start with the deployed v1 table definitions and existing records, so the
+  // upgrade path is tested as well as fresh creation and repeatability.
+  const legacyTables = schema.slice(0, schema.indexOf('-- Older installations')).replace(/^  created_at(?:_estimated)? .*\n/gm, '');
+  await pg.exec(legacyTables);
+  await pg.query('insert into public.note_folders(id, owner_id, name, updated_at) values ($1, $2, $3, $4)', [legacyFolder, legacyUser, 'Legacy folder', originalCreation]);
+  await pg.query('insert into public.note_boards(id, owner_id, name, updated_at) values ($1, $2, $3, $4)', [legacyBoard, legacyUser, 'Legacy board', originalCreation]);
+  // The other deployed migration already supplied created_at, but did not
+  // record whether it was a backfill. Exercise both upgrade paths together.
+  await pg.exec('alter table public.note_folders add column created_at timestamptz; update public.note_folders set created_at = updated_at');
   await pg.exec(schema);
   await pg.exec(schema); // Migration must also be safe to rerun.
 }, 30000);
@@ -41,7 +54,7 @@ afterAll(async () => { await pg?.close(); });
 describe('Supabase schema and access isolation', () => {
   it('preserves an offline creation date across cloud saves and schema reruns', async () => {
     await asUser(userA);
-    const id = '77777777-7777-4777-8777-777777777777';
+    const id = '99999999-9999-4999-8999-999999999999';
     const original = { id, name: 'Offline folder', parent_id: null, color: '#aaa', created_at: '2025-05-03T04:00:00Z' };
     const saved = await save('folder', original, 0);
     expect(new Date(saved.created_at).toISOString()).toBe('2025-05-03T04:00:00.000Z');
@@ -53,19 +66,56 @@ describe('Supabase schema and access isolation', () => {
     const result = await pg.query<{ created_at: string }>('select created_at from public.note_folders where id=$1', [id]);
     expect(new Date(result.rows[0].created_at).toISOString()).toBe('2025-05-03T04:00:00.000Z');
   });
+  it('migrates old creation dates once as estimates and keeps them on reruns', async () => {
+    await asUser(legacyUser);
+    for (const table of ['note_folders', 'note_boards']) {
+      const { rows } = await pg.query<{ created_at: string; created_at_estimated: boolean; updated_at: string }>(`select created_at, created_at_estimated, updated_at from public.${table}`);
+      expect(rows).toHaveLength(1);
+      expect(new Date(rows[0].created_at).toISOString()).toBe(originalCreation);
+      expect(rows[0].created_at_estimated).toBe(true);
+      expect(new Date(rows[0].created_at).getTime()).toBe(new Date(rows[0].updated_at).getTime());
+    }
+  });
+  it('lets a known original creation time repair an estimate once', async () => {
+    await asUser(legacyUser);
+    const actual = '2026-08-01T00:00:00.000Z';
+    for (const [kind, id, fields] of [
+      ['folder', legacyFolder, { parent_id: null, color: '#aaa' }],
+      ['board', legacyBoard, { folder_id: null, elements: [], app_state: {}, asset_ids: [] }]
+    ] as const) {
+      const record = { id, name: 'Legacy', ...fields, created_at: actual, created_at_estimated: false };
+      const repaired = await save(kind, record, 1);
+      expect(new Date(repaired.created_at).toISOString()).toBe(actual);
+      expect(repaired.created_at_estimated).toBe(false);
+      const later = await save(kind, { ...record, created_at: originalCreation }, 2);
+      expect(new Date(later.created_at).toISOString()).toBe(actual);
+      expect(later.created_at_estimated).toBe(false);
+    }
+  });
   it('creates a folder, its child, and a board as the signed-in owner', async () => {
     await asUser(userA);
-    const root = await save('folder', { id: parent, name: 'Projects', parent_id: null, color: '#b6a5e5' }, 0);
+    const root = await save('folder', { id: parent, name: 'Projects', parent_id: null, color: '#b6a5e5', created_at: originalCreation, created_at_estimated: false }, 0);
     expect(root.owner_id).toBe(userA); expect(root.revision).toBe(1);
-    await save('folder', { id: child, name: 'Research', parent_id: parent, color: '#b6a5e5' }, 0);
-    const saved = await save('board', { id: board, name: 'My board', folder_id: child, elements: [], app_state: {}, asset_ids: [], deleted: false }, 0);
+    expect(new Date(root.created_at).toISOString()).toBe(originalCreation);
+    expect(root.created_at_estimated).toBe(false);
+    const newChild = await save('folder', { id: child, name: 'Research', parent_id: parent, color: '#b6a5e5' }, 0);
+    expect(newChild.created_at).toBe(newChild.updated_at);
+    expect(newChild.created_at_estimated).toBe(false);
+    const saved = await save('board', { id: board, name: 'My board', folder_id: child, elements: [], app_state: {}, asset_ids: [], deleted: false, created_at: originalCreation, created_at_estimated: false }, 0);
     expect(saved.revision).toBe(1);
+    expect(new Date(saved.created_at).toISOString()).toBe(originalCreation);
   });
   it('rejects stale saves and accepts the correct revision', async () => {
     await asUser(userA);
     await expect(save('board', { id: board, name: 'Stale board', folder_id: child, elements: [], app_state: {}, asset_ids: [], deleted: false }, 0)).rejects.toThrow('NOTE_CONFLICT');
-    const updated = await save('board', { id: board, name: 'Updated board', folder_id: child, elements: [], app_state: {}, asset_ids: [], deleted: false }, 1);
+    const updated = await save('board', { id: board, name: 'Updated board', folder_id: child, elements: [], app_state: {}, asset_ids: [], deleted: false, created_at: '2026-10-15T01:00:00Z', created_at_estimated: true }, 1);
     expect(updated.revision).toBe(2);
+    expect(new Date(updated.created_at).toISOString()).toBe(originalCreation);
+    expect(updated.created_at_estimated).toBe(false);
+    await pg.query("update public.note_folders set created_at = now(), created_at_estimated = true where id = $1", [parent]);
+    const direct = await pg.query<{ created_at: string; created_at_estimated: boolean }>('select created_at, created_at_estimated from public.note_folders where id = $1', [parent]);
+    expect(new Date(direct.rows[0].created_at).toISOString()).toBe(originalCreation);
+    expect(direct.rows[0].created_at_estimated).toBe(false);
   });
   it('prevents another user from reading or updating an owner’s boards and folders', async () => {
     await asUser(userB);

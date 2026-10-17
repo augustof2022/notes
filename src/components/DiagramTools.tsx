@@ -6,6 +6,7 @@ import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/t
 import { GitBranch, Link2, Plus, Shapes, SlidersHorizontal, Type } from 'lucide-react';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
 import { attachDiagramEdge, createDiagramEdge, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
+import { diagramShortcutNode, diagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
 import './diagram.css';
 
@@ -76,8 +77,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const [snapshot, setSnapshot] = useState<{ elements: readonly ExcalidrawElement[]; state: AppState; key: string }>(() => ({ elements: api.getSceneElements(), state: api.getAppState(), key: '' }));
   const selection = selectedDiagram(snapshot.elements, snapshot.state);
   const chosen = selection.node || selection.edge;
-  const live = useRef({ placing, sourceId, connection, system, presetId, baseStyle });
-  live.current = { placing, sourceId, connection, system, presetId, baseStyle };
+  const live = useRef({ enabled, panel, placing, sourceId, connection, system, presetId, baseStyle });
+  live.current = { enabled, panel, placing, sourceId, connection, system, presetId, baseStyle };
   useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
   useLayoutEffect(() => {
     if (!root) return;
@@ -135,7 +136,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     onMessage(`Shape changed to ${preset.label}.`);
   }
 
-  function editLabel(element: ExcalidrawElement) {
+  function editLabel(element: ExcalidrawElement, selectText = false) {
     flushSync(() => {
       setPanel(false);
       api.updateScene({ appState: { selectedElementIds: { [element.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
@@ -143,6 +144,13 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     const editor = root?.querySelector<HTMLElement>('.excalidraw');
     editor?.focus();
     editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+    // Touch devices deliberately skip Excalidraw's native auto-selection. New labels
+    // should still be replaced by the first keystroke, including hardware keyboards.
+    if (selectText) {
+      const input = root?.querySelector<HTMLTextAreaElement>('textarea.excalidraw-wysiwyg');
+      input?.focus();
+      input?.select();
+    }
   }
   function commitAdded(added: ExcalidrawElement[], selectedId: string, edit = true) {
     const elements = api.getSceneElementsIncludingDeleted();
@@ -160,25 +168,73 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       if (left < 24 || top < 100 || left + node.width * zoom > state.width - 24 || top + node.height * zoom > state.height - 80) {
         flushSync(() => api.scrollToContent(node, { fitToContent: false, animate: false }));
       }
-      editLabel(node);
+      editLabel(node, true);
     }
   }
-  function addRelated(relation: 'child' | 'sibling') {
+  function addRelated(relation: 'child' | 'sibling', matchSelected = false) {
     const elements = api.getSceneElementsIncludingDeleted();
     const node = selectedDiagram(elements, api.getAppState()).node;
     const data = node && readDiagramData(node);
     if (!node || data?.kind !== 'node') return;
     const palette = DIAGRAM_SYSTEMS.find(item => item.id === data.system)!;
-    const preset = palette.presets.find(item => item.id === live.current.presetId) || palette.presets.find(item => item.id === data.shapeId) || palette.presets[0];
+    const sourcePreset = palette.presets.find(item => item.id === data.shapeId) || palette.presets[0];
+    const preset = matchSelected ? { ...sourcePreset, width: node.width, height: node.height }
+      : palette.presets.find(item => item.id === live.current.presetId) || sourcePreset;
     const position = nextNodePosition(getDiagramNodes(elements), node, relation, preset);
-    const label = elements.find(element => element.type === 'text' && element.containerId === node.id);
+    const label = elements.find(element => !element.isDeleted && element.type === 'text' && element.containerId === node.id);
     const added = createDiagramNode(preset, position, data.diagramId, styleOf(node), label?.strokeColor);
     const child = added.find(element => readDiagramData(element)?.kind === 'node')!;
+    if (matchSelected) for (const element of added) {
+      if (element.type === 'text' && label?.type === 'text') mutateElement(element, {
+        fontSize: label.fontSize, fontFamily: label.fontFamily, lineHeight: label.lineHeight,
+        textAlign: label.textAlign, verticalAlign: label.verticalAlign, opacity: label.opacity,
+      }, false);
+      else if (element.type !== 'text') mutateElement(element, {
+        ...(element.id === child.id ? { width: node.width, height: node.height } : {}),
+        fillStyle: node.fillStyle, roughness: node.roughness, roundness: node.roundness, opacity: node.opacity,
+      }, false);
+    }
     const parent = position.parentId && elements.find(element => element.id === position.parentId && !element.isDeleted);
     if (parent) added.push(...createDiagramEdge(parent, child, nativeSettings(live.current.connection), styleOf(node)));
     activeDiagram.current = data.diagramId;
     commitAdded(added, child.id);
   }
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      const relation = diagramShortcutRelation(event), current = live.current;
+      if (!relation || !root || !current.enabled || current.panel || current.placing || current.sourceId) return;
+      const editor = root.querySelector<HTMLElement>('.excalidraw');
+      const target = event.target;
+      if (!editor || !(target instanceof HTMLElement) || !editor.contains(target)) return;
+      // Excalidraw's inline color/font palettes also use role=dialog. Their inputs
+      // are excluded by the focus guard; only an application modal blocks canvas keys.
+      const dialogOpen = [...document.querySelectorAll<HTMLElement>('[role="dialog"], dialog[open]')]
+        .some(dialog => !editor.contains(dialog) && dialog.getClientRects().length > 0 && getComputedStyle(dialog).visibility !== 'hidden');
+      if (dialogOpen) return;
+      const nativeText = target instanceof HTMLTextAreaElement && target.classList.contains('excalidraw-wysiwyg');
+      if (!nativeText && target !== editor && !(target instanceof HTMLCanvasElement)) return;
+      const state = api.getAppState();
+      if (state.openDialog || state.viewModeEnabled) return;
+      if (!!state.editingTextElement !== nativeText) return;
+      const node = diagramShortcutNode(api.getSceneElements(), state);
+      if (!node || node.locked) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      // Native text installs its blur handler on a timer. Submit through its
+      // synchronous keyboard handler so rapid Tab commands also clean up the old
+      // editor before creating and focusing the next label in this same keydown.
+      flushSync(() => {
+        if (nativeText) target.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', ctrlKey: true, metaKey: true, cancelable: true,
+        }));
+        api.updateScene({ appState: { selectedElementIds: { [node.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
+      });
+      if (nativeText && target.isConnected) return;
+      addRelated(relation, true);
+    };
+    document.addEventListener('keydown', shortcut, true);
+    return () => document.removeEventListener('keydown', shortcut, true);
+  }, [api, root]);
   function beginConnection() {
     const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
     if (!node) return;

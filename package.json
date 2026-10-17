@@ -1,10 +1,12 @@
 {
   "name": "note-canvas",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/check-version.mjs",
     "dev": "vite --host 127.0.0.1",
+    "prebuild": "node scripts/check-version.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",

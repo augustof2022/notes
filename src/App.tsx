@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import type { Session } from '@supabase/supabase-js';
-import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Cloud, CloudOff, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Cloud, CloudOff, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, X } from 'lucide-react';
 import type { Asset, Board, Folder, SearchMatch, Settings } from './types';
 import { recordKey } from './types';
 import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, seedLocal, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
@@ -16,8 +16,8 @@ import { Modal } from './components/Modal';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { readOAuthReturn } from './lib/oauth-return';
 import { LibrarySort } from './components/LibrarySort';
-import { isLibrarySort, sortRecords } from './lib/library-sort';
-import { version } from '../package.json';
+import { readLibrarySorts, sortLibraryRecords, storeLibrarySorts } from './lib/library-sort';
+import { APP_VERSION } from './lib/version';
 
 type Dialog = { kind: 'folder' | 'board' | 'rename' | 'move'; record?: Board | Folder } | { kind: 'settings' | 'auth' | 'help' | 'search' } | null;
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -27,6 +27,13 @@ function relativeDate(date: string) {
   return days < 1 ? 'Today' : days === 1 ? 'Yesterday' : `${days} days ago`;
 }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : 'Something went wrong. Please try again.'; }
+function importedCreation(record: { createdAt?: unknown; createdAtEstimated?: unknown; updatedAt?: unknown }) {
+  const valid = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  return valid(record.createdAt)
+    ? { createdAt: record.createdAt, createdAtEstimated: record.createdAtEstimated !== false }
+    : { createdAt: valid(record.updatedAt) ? record.updatedAt : new Date().toISOString(), createdAtEstimated: true };
+}
+function readSidebarCollapsed() { try { return localStorage.getItem('note-sidebar-collapsed') === 'true'; } catch { return false; } }
 
 export default function App() {
   const [oauthReturn] = useState(() => readOAuthReturn(location.href));
@@ -35,6 +42,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const scope = session?.user.id || 'local';
   const [workspace, setWorkspace] = useState<{ folders: Folder[]; boards: Board[] }>({ folders: [], boards: [] });
+  const [librarySorts, setLibrarySorts] = useState(readLibrarySorts);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [trash, setTrash] = useState<(Board | Folder)[]>([]);
   const [folderId, setFolderId] = useState<string | null>(null);
@@ -43,14 +51,9 @@ export default function App() {
   const [view, setView] = useState<'library' | 'trash'>('library');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<Dialog>(oauthReturn ? { kind: 'auth' } : null);
-  const [sorting, setSorting] = useState(() => {
-    let saved: Record<string, unknown> = {};
-    try { saved = JSON.parse(localStorage.getItem('note-library-sorting') || '{}') || {}; } catch {}
-    return { folders: isLibrarySort(saved.folders) ? saved.folders : 'name-asc' as const, boards: isLibrarySort(saved.boards) ? saved.boards : 'modified-desc' as const };
-  });
-  useEffect(() => { try { localStorage.setItem('note-library-sorting', JSON.stringify(sorting)); } catch {} }, [sorting]);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [syncStatus, setSyncStatus] = useState('Saved on this device');
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState('');
@@ -73,6 +76,8 @@ export default function App() {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; storeSettings(settings); }, [settings]);
   useEffect(() => watchSettings(setSettings), []);
+  useEffect(() => storeLibrarySorts(librarySorts), [librarySorts]);
+  useEffect(() => { try { localStorage.setItem('note-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* Collapsing still works without browser storage. */ } }, [sidebarCollapsed]);
   useEffect(() => {
     if (oauthReturn) history.replaceState(history.state, '', oauthReturn.url);
   }, [oauthReturn]);
@@ -161,6 +166,7 @@ export default function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (dialog) return;
+      if (sidebarOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSidebarOpen(false); return; }
       const editing = event.target instanceof HTMLElement && (!!event.target.closest('input,textarea,[contenteditable="true"]'));
       const appShortcut = ((event.ctrlKey || event.metaKey) && ['k', 's'].includes(event.key.toLowerCase()))
         || ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'n')
@@ -173,7 +179,7 @@ export default function App() {
       if (!editing && event.key === '?') { event.preventDefault(); setDialog({ kind: 'help' }); }
     };
     window.addEventListener('keydown', key, true); return () => window.removeEventListener('keydown', key, true);
-  }, [dialog, folderId, currentBoard, scope, sync]);
+  }, [dialog, folderId, currentBoard, scope, sync, sidebarOpen]);
   async function moveRecord(record: Board | Folder, destination: string | null) {
     await flushCanvas();
     if ('parentId' in record) {
@@ -210,7 +216,7 @@ export default function App() {
   }
   async function duplicate(board: Board) {
     await flushCanvas(); const current = await db.boards.get(board.key); if (!current) return;
-    const id = crypto.randomUUID(); await db.boards.add({ ...current, id, key: recordKey(scope, id), name: `${current.name} (copy)`, createdAt: new Date().toISOString(), remoteRevision: 0, ...touch() });
+    const id = crypto.randomUUID(), createdAt = new Date().toISOString(); await db.boards.add({ ...current, id, key: recordKey(scope, id), name: `${current.name} (copy)`, remoteRevision: 0, createdAt, createdAtEstimated: false, updatedAt: createdAt, dirty: true });
     setMenuFor(null); message('Board duplicated'); void sync();
   }
   async function exportBackup() {
@@ -231,12 +237,12 @@ export default function App() {
       for (const folder of data.folders) {
         if (typeof folder.name !== 'string' || folder.name.length > 200) throw new Error('Invalid folder in backup.');
         const id = folderIds.get(folder.id)!;
-        await db.folders.put({ ...folder, createdAt: folder.createdAt || folder.updatedAt, id, scope, key: recordKey(scope, id), parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...touch() });
+        await db.folders.put({ ...folder, id, scope, key: recordKey(scope, id), parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...importedCreation(folder), ...touch() });
       }
       for (const board of data.boards) {
         if (typeof board.name !== 'string' || !Array.isArray(board.elements) || !Array.isArray(board.assetIds)) throw new Error('Invalid board in backup.');
         const id = crypto.randomUUID();
-        await db.boards.put({ ...board, createdAt: board.createdAt || board.updatedAt, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...touch() });
+        await db.boards.put({ ...board, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...importedCreation(board), ...touch() });
       }
       for (const asset of data.assets) {
         if (typeof asset.id !== 'string' || typeof asset.dataURL !== 'string' || !asset.dataURL.startsWith('data:image/')) throw new Error('The backup has a missing or invalid image.');
@@ -255,7 +261,7 @@ export default function App() {
     </div>;
   }
   function folderTree(parentId: string | null, depth = 0, seen = new Set<string>()) {
-    return sortRecords(workspace.folders.filter(x => x.parentId === parentId && !seen.has(x.id)), sorting.folders).map(folder => {
+    return sortLibraryRecords(workspace.folders.filter(x => x.parentId === parentId && !seen.has(x.id)), librarySorts.folders).map(folder => {
       const children = workspace.folders.some(x => x.parentId === folder.id) || workspace.boards.some(x => x.folderId === folder.id);
       const open = expanded.has(folder.id);
       return <div key={folder.id}>
@@ -266,17 +272,18 @@ export default function App() {
           <button className="tree-more icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={15} /></button>
           {menuFor === folder.id && recordMenu(folder)}
         </div>
-        {open && <>{folderTree(folder.id, depth + 1, new Set([...seen, folder.id]))}{sortRecords(workspace.boards.filter(x => x.folderId === folder.id), sorting.boards).map(board => <button key={board.id} className={`tree-board ${boardId === board.id ? 'active' : ''}`} style={{ paddingLeft: 36 + depth * 15 }} onClick={() => void openBoard(board)} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}><StickyNote size={15} /><span>{board.name}</span></button>)}</>}
+        {open && <>{folderTree(folder.id, depth + 1, new Set([...seen, folder.id]))}{sortLibraryRecords(workspace.boards.filter(x => x.folderId === folder.id), librarySorts.boards).map(board => <button key={board.id} className={`tree-board ${boardId === board.id ? 'active' : ''}`} style={{ paddingLeft: 36 + depth * 15 }} onClick={() => void openBoard(board)} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}><StickyNote size={15} /><span>{board.name}</span></button>)}</>}
       </div>;
     });
   }
-  const directFolders = sortRecords(workspace.folders.filter(x => x.parentId === folderId), sorting.folders);
-  const visibleBoards = sortRecords(workspace.boards.filter(x => folderId === null || x.folderId === folderId), sorting.boards);
+  const directFolders = sortLibraryRecords(workspace.folders.filter(x => x.parentId === folderId), librarySorts.folders);
+  const visibleBoards = sortLibraryRecords(workspace.boards.filter(x => folderId === null || x.folderId === folderId), librarySorts.boards);
   const matches = dialog?.kind === 'search' ? searchBoards(workspace.boards, workspace.folders, assets, query, searchFolderId) : [];
   const dirtyCount = workspace.boards.filter(x => x.dirty).length + workspace.folders.filter(x => x.dirty).length + assets.filter(x => x.dirty).length;
-  return <div className="app-shell" onClick={event => { if (!(event.target as HTMLElement).closest('.item-menu,.tree-more,.card-menu-button,.board-options')) setMenuFor(null); }}>
+  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} onClick={event => { if (!(event.target as HTMLElement).closest('.item-menu,.tree-more,.card-menu-button,.board-options')) setMenuFor(null); }}>
     {sidebarOpen && <button className="sidebar-overlay" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} />}
-    <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+    <aside id="note-sidebar" className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <button className="icon-button mobile-sidebar-close" aria-label="Hide sidebar" onClick={() => setSidebarOpen(false)}><X size={19} /></button>
       <button className="brand" onClick={() => void navigateFolder(null)}><span className="brand-mark">N<span /></span><span>Note<span className="brand-caption">a little room for big ideas</span></span></button>
       <button className="search-trigger" onClick={openSearch}><Search size={16} /><span>Find anything</span><kbd>Ctrl K</kbd></button>
       <button className="new-board-button" onClick={() => setDialog({ kind: 'board' })}><Plus size={18} /><span>New board</span><span className="new-shortcut">↵</span></button>
@@ -284,21 +291,20 @@ export default function App() {
       <div className="tree-heading"><span>YOUR FOLDERS</span><button className="icon-button" aria-label="New folder" title="New folder (Ctrl Alt Shift N)" onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={16} /></button></div>
       <div className="folder-tree" onDragOver={event => event.preventDefault()} onDrop={event => { if (event.target !== event.currentTarget) return; try { const data = JSON.parse(event.dataTransfer.getData('application/x-note')); const record = data.kind === 'folder' ? workspace.folders.find(x => x.id === data.id) : workspace.boards.find(x => x.id === data.id); if (record) void moveRecord(record, null).catch(error => message(messageOf(error))); } catch {} }}>
         {folderTree(null)}
-        {sortRecords(workspace.boards.filter(x => x.folderId === null), sorting.boards).map(board => <button className={`tree-board ${boardId === board.id ? 'active' : ''}`} key={board.id} onClick={() => void openBoard(board)}><StickyNote size={15} /><span>{board.name}</span></button>)}
+        {sortLibraryRecords(workspace.boards.filter(x => x.folderId === null), librarySorts.boards).map(board => <button className={`tree-board ${boardId === board.id ? 'active' : ''}`} key={board.id} onClick={() => void openBoard(board)}><StickyNote size={15} /><span>{board.name}</span></button>)}
         {!workspace.folders.length && <p className="tree-empty">Make a folder for a project,<br />or a corner of your mind.</p>}
       </div>
       <div className="sidebar-bottom">
         <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setView('trash'); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{trash.length > 0 && <span className="count">{trash.length}</span>}</button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'help' })}><Keyboard size={16} /><span>Keyboard shortcuts</span><kbd>?</kbd></button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'settings' })}><SettingsIcon size={16} /><span>Settings & storage</span></button>
-        <a className="app-version" href="./about.html#version-updates" target="_blank" rel="noreferrer" aria-label={`Note version ${version}, view updates`}>Note v{version}</a>
         <nav className="legal-links" aria-label="About and policies"><a href="./about.html" target="_blank" rel="noreferrer">About</a><a href="./privacy.html" target="_blank" rel="noreferrer">Privacy</a><a href="./terms.html" target="_blank" rel="noreferrer">Terms</a></nav>
         <div className="account-box"><span className="avatar">{session?.user.email?.[0]?.toUpperCase() || 'Y'}</span><div><strong>{session?.user.email || 'Your workspace'}</strong><span>{scope === 'local' ? 'On this device' : settings.imageStore === 'drive' ? 'Supabase + Google Drive' : 'Supabase cloud'}</span></div><button className="icon-button" aria-label={session ? 'Account settings' : 'Sign in to sync'} onClick={() => setDialog({ kind: session ? 'settings' : 'auth' })}><ArrowUpRight size={17} /></button></div>
       </div>
     </aside>
     <main className="main-content">
-      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><button onClick={() => void navigateFolder(null)}><Grid2X2 size={14} /> Workspace</button>{path.map(folder => <span key={folder.id}><ChevronRight size={13} /><button onClick={() => void navigateFolder(folder.id)}>{folder.name}</button></span>)}{currentBoard && <span><ChevronRight size={13} /><button className="breadcrumb-current" onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>{currentBoard.name}</button></span>}</div></div>
-        <div className="topbar-actions"><button className={`save-status ${syncing ? 'is-syncing' : ''}`} title={scope === 'local' ? syncStatus : `${syncStatus}${dirtyCount ? ` · ${dirtyCount} items waiting` : ''}`} onClick={() => scope === 'local' ? setDialog({ kind: 'auth' }) : void sync()}>{syncing ? <Loader2 size={14} className="spinning" /> : scope === 'local' ? <CloudOff size={14} /> : dirtyCount ? <RefreshCw size={14} /> : <Check size={14} />}<span>{scope === 'local' ? 'Saved locally' : syncing ? 'Syncing' : dirtyCount ? 'Sync pending' : syncStatus.startsWith('Everything') ? 'Synced' : 'Check sync'}</span></button>{installEvent && <button className="icon-button" title="Install Note" aria-label="Install Note" onClick={() => void installEvent.prompt().then(() => setInstallEvent(null))}><ArrowDownToLine size={17} /></button>}
+      <header className="topbar"><div className="topbar-left"><button className="icon-button desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!sidebarCollapsed} aria-controls="note-sidebar" onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><button onClick={() => void navigateFolder(null)}><Grid2X2 size={14} /> Workspace</button>{path.map(folder => <span key={folder.id}><ChevronRight size={13} /><button onClick={() => void navigateFolder(folder.id)}>{folder.name}</button></span>)}{currentBoard && <span><ChevronRight size={13} /><button className="breadcrumb-current" onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>{currentBoard.name}</button></span>}</div></div>
+        <div className="topbar-actions"><a className="app-version" href="./updates.html" target="_blank" rel="noreferrer" aria-label={`Note version ${APP_VERSION}. View version updates`}>v{APP_VERSION}</a><button className={`save-status ${syncing ? 'is-syncing' : ''}`} title={scope === 'local' ? syncStatus : `${syncStatus}${dirtyCount ? ` · ${dirtyCount} items waiting` : ''}`} onClick={() => scope === 'local' ? setDialog({ kind: 'auth' }) : void sync()}>{syncing ? <Loader2 size={14} className="spinning" /> : scope === 'local' ? <CloudOff size={14} /> : dirtyCount ? <RefreshCw size={14} /> : <Check size={14} />}<span>{scope === 'local' ? 'Saved locally' : syncing ? 'Syncing' : dirtyCount ? 'Sync pending' : syncStatus.startsWith('Everything') ? 'Synced' : 'Check sync'}</span></button>{currentBoard && <button className="icon-button board-chrome-trigger" aria-label="Board toolbar visibility" title="Show or hide board toolbars" onClick={() => canvasRef.current?.toggleControls()}><PanelsTopLeft size={18} /></button>}{installEvent && <button className="icon-button" title="Install Note" aria-label="Install Note" onClick={() => void installEvent.prompt().then(() => setInstallEvent(null))}><ArrowDownToLine size={17} /></button>}
         {currentBoard ? <div className="board-options"><button className="icon-button" aria-label="Board options" onClick={() => setMenuFor(menuFor === currentBoard.id ? null : currentBoard.id)}><MoreHorizontal size={21} /></button>{menuFor === currentBoard.id && <div className="item-menu board-menu"><button onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>Rename</button><button onClick={() => setDialog({ kind: 'move', record: currentBoard })}>Move to folder</button><button onClick={() => void canvasRef.current?.exportPng().then(blob => { if (blob) download(`${currentBoard.name}.png`, blob); else message('Add something to the board first.'); }).catch(error => message(messageOf(error)))}>Export PNG</button><button className="danger" onClick={() => void moveToTrash(currentBoard)}>Move to Trash</button></div>}</div> : <button className="icon-button" aria-label="Search workspace" onClick={openSearch}><Search size={18} /></button>}</div>
       </header>
       {needRefresh && <div className="update-banner"><span>A new version of Note is ready.</span><button onClick={() => void flushCanvas().then(() => updateServiceWorker(true)).catch(error => message(messageOf(error)))}>Save and update <RefreshCw size={13} /></button></div>}
@@ -306,8 +312,11 @@ export default function App() {
         : view === 'trash' ? <section className="library"><div className="library-intro"><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore a board or folder whenever you need it.</p></div>{trash.length ? <div className="trash-list">{trash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
         : <section className="library"><div className="library-intro"><p className="eyebrow">YOUR SPACE TO THINK</p><div className="library-title"><h1>{currentFolder?.name || 'A little room for big ideas.'}</h1>{currentFolder && <button className="icon-button" aria-label="Rename current folder" onClick={() => setDialog({ kind: 'rename', record: currentFolder })}><MoreHorizontal size={22} /></button>}</div><p>{currentFolder ? 'Keep everything together. Give every thought a little space.' : 'Collect the things that spark something. Make sense of them here.'}</p></div>
           {scope === 'local' && <div className="sync-banner"><span className="banner-icon"><Cloud size={21} /></span><div><strong>Your ideas, wherever you are.</strong><p>{client ? 'Sign in to open your cloud boards on your other devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p></div>{client && <button onClick={() => setDialog({ kind: 'auth' })}>Sign in to sync <ArrowUpRight size={15} /></button>}</div>}
-          <div className="section-heading folder-section-heading"><h2>Folders <span>{directFolders.length}</span></h2><div><button onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={15} /> New folder</button><LibrarySort kind="folders" value={sorting.folders} onChange={value => setSorting(previous => ({ ...previous, folders: value }))} /></div></div><div className="folder-grid">{directFolders.map(folder => <div className="folder-card" key={folder.id}><button className="folder-card-main" onClick={() => void navigateFolder(folder.id)}><FolderIcon size={31} fill={folder.color} color={folder.color} /><span><strong>{folder.name}</strong><small>{workspace.boards.filter(x => x.folderId && descendantFolderIds(workspace.folders, folder.id).has(x.folderId)).length} boards</small></span></button><button className="card-menu-button icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={17} /></button>{menuFor === folder.id && recordMenu(folder)}</div>)}</div>
-          <div className="section-heading board-section-heading"><h2>{folderId ? 'Boards in this folder' : 'Your boards'} <span>{visibleBoards.length}</span></h2><div><button onClick={() => setDialog({ kind: 'board' })}><Plus size={15} /> New board</button><LibrarySort kind="boards" value={sorting.boards} onChange={value => setSorting(previous => ({ ...previous, boards: value }))} /></div></div>
+          <div className="section-heading library-section-heading"><h2>Folders <span>{directFolders.length}</span></h2><div className="library-actions"><LibrarySort label="Sort folders" value={librarySorts.folders} onChange={value => setLibrarySorts(previous => ({ ...previous, folders: value }))} /><button onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={15} /> New folder</button></div></div>
+          {librarySorts.folders.startsWith('created') && directFolders.some(item => !item.createdAt || item.createdAtEstimated) && <p className="library-sort-note">Older items use their earliest recorded date.</p>}
+          <div className="folder-grid">{directFolders.map(folder => <div className="folder-card" key={folder.id}><button className="folder-card-main" onClick={() => void navigateFolder(folder.id)}><FolderIcon size={31} fill={folder.color} color={folder.color} /><span><strong>{folder.name}</strong><small>{workspace.boards.filter(x => x.folderId && descendantFolderIds(workspace.folders, folder.id).has(x.folderId)).length} boards</small></span></button><button className="card-menu-button icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={17} /></button>{menuFor === folder.id && recordMenu(folder)}</div>)}</div>
+          <div className="section-heading board-section-heading library-section-heading"><h2>{folderId ? 'Boards in this folder' : 'Your boards'} <span>{visibleBoards.length}</span></h2><div className="library-actions"><LibrarySort label="Sort boards" value={librarySorts.boards} onChange={value => setLibrarySorts(previous => ({ ...previous, boards: value }))} /><button onClick={() => setDialog({ kind: 'board' })}><Plus size={15} /> New board</button></div></div>
+          {librarySorts.boards.startsWith('created') && visibleBoards.some(item => !item.createdAt || item.createdAtEstimated) && <p className="library-sort-note">Older items use their earliest recorded date.</p>}
           <div className="board-grid">{visibleBoards.map((board, index) => <div className="board-card" key={board.id} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}><button className={`board-card-main card-color-${index % 4}`} onClick={() => void openBoard(board)}><div className="board-thumbnail"><BoardThumbnail board={board} /><span className="thumbnail-open"><ArrowUpRight size={18} /></span></div><div className="board-card-info"><strong>{board.name}</strong><span>{folderPath(workspace.folders, board.folderId).map(x => x.name).join(' / ') || 'Workspace'}<i />{relativeDate(board.updatedAt)}</span></div></button><button className="card-menu-button icon-button" aria-label={`Options for ${board.name}`} onClick={() => setMenuFor(menuFor === board.id ? null : board.id)}><MoreHorizontal size={18} /></button>{menuFor === board.id && recordMenu(board)}</div>)}<button className="create-board-card" onClick={() => setDialog({ kind: 'board' })}><span><Plus size={24} /></span><strong>A fresh canvas</strong><small>Make room for the next idea</small></button></div>
           <div className="library-tip"><span><Sparkles size={15} /></span><p>A screenshot is a great place to start. <kbd>Win Shift S</kbd> to capture, then <kbd>Ctrl V</kbd> to paste into a board.</p></div>
         </section>}
@@ -317,11 +326,11 @@ export default function App() {
       if (dialog.kind === 'rename' && dialog.record) { await flushCanvas(); if ('parentId' in dialog.record) await db.folders.update(dialog.record.key, { name, ...touch() }); else await db.boards.update(dialog.record.key, { name, ...touch() }); }
       else if (dialog.kind === 'folder') { await flushCanvas(); const folder = await newFolder(scope, name, folderId); if (folderId) setExpanded(previous => new Set([...previous, folderId])); setFolderId(folder.id); setBoardId(null); }
       else { await flushCanvas(); const board = await newBoard(scope, name, folderId); setBoardId(board.id); if (folderId) setExpanded(previous => new Set([...previous, folderId])); }
-      setDialog(null); void sync();
+      setDialog(null); setSidebarOpen(false); void sync();
     }} />}
     {dialog?.kind === 'move' && dialog.record && <MoveDialog record={dialog.record} folders={workspace.folders} onClose={() => setDialog(null)} onMove={destination => moveRecord(dialog.record!, destination)} />}
     {dialog?.kind === 'search' && <Modal title="Find anything" wide onClose={() => setDialog(null)}><div className="search-modal-input"><Search size={20} /><input autoFocus aria-label="Search notes and boards" placeholder="A word, an idea, a screenshot…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>Esc</kbd></div><div className="search-scope"><span>Search in</span><select aria-label="Search folder" value={searchFolderId || ''} onChange={event => setSearchFolderId(event.target.value || null)}><option value="">Entire workspace</option>{workspace.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(workspace.folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select><small>Includes all subfolders</small></div><div className="search-results">{!query.trim() ? <div className="search-empty"><Search size={26} /><p>Search board names, typed notes, image text, and saved handwriting text.</p></div> : matches.length ? matches.map((match, index) => <SearchResult key={`${match.board.id}:${match.elementId || 'title'}:${index}`} match={match} folders={workspace.folders} onOpen={() => void openBoard(match.board, match.elementId)} />) : <div className="search-empty"><p>No matches in this folder.</p><small>Try fewer words or choose Entire workspace.</small></div>}</div></Modal>}
-    {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Canvas shortcuts work when you aren’t editing text.</p></Modal>}
+    {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
     {dialog?.kind === 'settings' && <SettingsDialog cloudConfigured={!!client} settings={settings} session={session} syncStatus={syncStatus} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
     {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} initialError={authError} onGoogle={signInWithGoogle} onClose={() => { setDialog(null); setAuthError(''); }} onComplete={() => { setDialog(null); setAuthError(''); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
   </div>;
@@ -378,7 +387,7 @@ function SettingsDialog({ cloudConfigured, settings, session, syncStatus, assets
   const [draft, setDraft] = useState(settings); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const [tab, setTab] = useState<'cloud' | 'storage' | 'preferences'>('cloud');
   const fileRef = useRef<HTMLInputElement>(null);
   function action(work: () => Promise<void>) { setError(''); setBusy(true); void work().catch(error => setError(messageOf(error))).finally(() => setBusy(false)); }
-  return <Modal title="Make Note yours" wide onClose={onClose}><div className="settings-tabs">{(['cloud', 'storage', 'preferences'] as const).map(value => <button key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value === 'cloud' ? 'Cloud sync' : value === 'storage' ? 'Images & search' : 'Preferences & backup'}</button>)}</div><form onSubmit={event => { event.preventDefault(); action(async () => { await onSave(draft); setNotice('Settings saved.'); }); }}>
+  return <Modal title="Make Note yours" wide onClose={onClose}><p className="settings-version">Note v{APP_VERSION} · <a href="./updates.html" target="_blank" rel="noreferrer">Version updates</a></p><div className="settings-tabs">{(['cloud', 'storage', 'preferences'] as const).map(value => <button key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value === 'cloud' ? 'Cloud sync' : value === 'storage' ? 'Images & search' : 'Preferences & backup'}</button>)}</div><form onSubmit={event => { event.preventDefault(); action(async () => { await onSave(draft); setNotice('Settings saved.'); }); }}>
     {tab === 'cloud' && <><p className="dialog-description">{cloudConfigured ? 'Sign in to sync your folders, boards, and images across devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p><div className="settings-account"><span><Cloud size={18} /><strong>{session?.user.email || 'Not signed in'}</strong></span><button type="button" className="secondary-button" disabled={busy || !cloudConfigured} onClick={() => session ? action(onSignOut) : onSignIn()}>{session ? 'Sign out' : 'Sign in'}</button></div><p className="small-note sync-detail">{syncStatus}</p>{session && <button className="secondary-button" type="button" disabled={busy} onClick={() => action(onImportLocal)}>Copy this device’s boards into my account</button>}</>}
     {tab === 'storage' && <><p className="dialog-description">Paste an image onto a board. Note saves it in the background.</p><label>Store new images in<select value={draft.imageStore} onChange={event => setDraft({ ...draft, imageStore: event.target.value as Settings['imageStore'] })}><option value="supabase">Supabase Storage</option><option value="drive">My Google Drive — private “Note images” folder</option></select></label><p className="small-note">Google sign-in automatically selects Drive for new images. Existing images stay in their original storage.</p><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onConnectDrive)}>{session ? 'Reconnect Google Drive' : 'Connect Google Drive'} <ArrowUpRight size={15} /></button><p className="small-note">{driveConnected(session?.user.id) ? `Drive connected for ${session?.user.email || 'your Google account'}.` : 'Drive is not connected for uploads in this session. Reconnect with the same Google account to upload waiting images; they remain saved on this device.'}</p><div className="upload-status"><strong>{assets.filter(x => x.dirty).length} image{assets.filter(x => x.dirty).length === 1 ? '' : 's'} waiting to sync</strong><p role="status">{syncStatus}</p>{assets.filter(x => x.dirty && x.syncError).slice(0, 3).map(asset => <p key={asset.key} className="upload-error">{asset.syncError}</p>)}<button type="button" className="secondary-button" disabled={busy || syncing || !session} onClick={() => action(async () => { await onSyncNow(); setNotice('Sync attempt finished. Check the upload status above.'); })}>{syncing ? 'Uploading…' : 'Retry uploads now'}</button><p className="small-note">Keep Note open on the device where you added the images until syncing finishes. If Drive needs access, use Reconnect Google Drive above.</p></div><label className="toggle-row"><span><strong>Search words in images</strong><small>Free English OCR runs on your device.</small></span><input type="checkbox" checked={draft.ocrEnabled} onChange={event => setDraft({ ...draft, ocrEnabled: event.target.checked })} /></label><button type="button" className="text-button" disabled={busy} onClick={() => action(onRetryOcr)}>Retry unread images</button></>}
     {tab === 'preferences' && <><label>Appearance<select value={draft.theme} onChange={event => setDraft({ ...draft, theme: event.target.value as Settings['theme'] })}><option value="light">Light — a quiet place to think</option><option value="dark">Dark — for late-night ideas</option></select></label><div className="backup-block"><h3>Keep a copy of your ideas</h3><p>Export your workspace, including images and screenshot text, as a portable backup. Importing creates new boards.</p><div><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onExport)}><ArrowDownToLine size={16} /> Export backup</button><button type="button" className="secondary-button" disabled={busy} onClick={() => fileRef.current?.click()}>Import backup</button></div><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={event => { const file = event.target.files?.[0]; if (file) action(() => onImport(file)); event.target.value = ''; }} /></div><p className="small-note">Local boards belong to this browser. Export a backup before clearing browser data.</p></>}

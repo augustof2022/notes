@@ -148,7 +148,7 @@ export function DiagramPanel(props: DiagramPanelProps) {
             <button type="button" onClick={props.onConnect}><Link2 size={17} aria-hidden="true" />Add connection</button>
             <button type="button" onClick={props.onEditLabel}><Type size={17} aria-hidden="true" />Edit text</button>
           </div>
-          <p className="diagram-help">Choose a shape below to change this object, or add a child or sibling with its own shape.</p>
+          <p className="diagram-help">Choose a shape below to change this object, or add a child or sibling with its own shape. On the canvas or while typing its label, press Tab to add a child or Shift+Tab to add a sibling with the same shape.</p>
         </section>}
 
         <section className="diagram-palette" aria-labelledby={`${id}-palette`}>

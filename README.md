@@ -2,13 +2,14 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.2.4**. The app sidebar shows the installed version; About → Version updates contains the release history. Keep `package.json`, the root version in `package-lock.json`, and the version entries in `public/about.html` together when releasing.
+Current release: **v0.3.0**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
 - Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor. Pen strokes use fixed pressure, and text mode stays active for consecutive notes.
 - Board snapping: tap **Snap: Off → Elements → Grid → Off** in the canvas controls. Elements shows alignment guides and snaps nearby edges, centers, and spacing while dragging. Grid shows a visible grid and snaps placement to its cells. Tap the adjacent size button to adjust each board’s grid from 1–100 pixels (default 20); the mode and size are saved with the board. Existing items stay in place until moved. Pen strokes remain freehand.
 - Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
+- Hide or restore the left sidebar from the header. In a board, **Board toolbar visibility** controls board actions, drawing tools, navigation tools, and editing tools independently, or hides/restores them together. These visibility preferences stay on the browser; the restore control remains in the header.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
 - Nested folders with rename, move, drag into another folder, and recoverable Trash. Library sections have separate New folder and New board actions. Folders and boards sort independently by name (A–Z/Z–A), creation date, or last modification (newest/oldest); choices are remembered on the device and also order the sidebar.
 - Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.
@@ -42,6 +43,7 @@ The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, a
 
 1. Open a board and choose **Diagrams**. Select a diagram system and a shape, then choose **Add** and tap the board to place it. Text editing opens immediately; type the label and click outside or press Escape to finish. Table names and column/key lists are editable text.
 2. Select a diagram shape to show its four quick actions, including when reopening a saved board. Choosing Exit diagram mode disables these actions until you open Diagrams again. **Add child** creates a connected node below that shape. **Add sibling** creates another node beside it with the same parent; its connection goes to that shared parent. Adding a sibling to a root creates another root. New nodes avoid existing diagram shapes, and the view pans to keep a new node visible.
+   Press **Tab** for a child or **Shift+Tab** for a sibling, either with a diagram shape selected on the canvas or while typing its label. The shortcut saves the current label, copies that shape’s preset, size, and style, and opens the new label for typing without asking you to choose a shape. Normal Tab navigation still works in menus, dialogs, and other inputs.
 3. **Edit shape** opens the palette for a selected node. Pick a shape from the same diagram system and choose **Apply … to selected shape** to keep the node’s text, colors, hierarchy, and connections. **Add child** and **Add sibling** first offer that system’s shapes when more than one is available, then add the chosen shape. Systems with one shape add it directly. **Add new …** places a separate diagram. Canvas object menus are hidden while the palette is open, including on mobile. Diagram actions remain available inside the built-in mobile Edit panel while it is open and float beside the selection when it closes. Desktop actions remain visible when the editor retains a shape-menu flag without showing a covering mobile panel.
 4. **Add connection** starts a link to another diagram shape. Choose From and To sides, then tap the target. Connections back to earlier nodes are allowed and do not change parent/child relationships. Escape or Cancel stops placement or connecting.
 5. Select a connection and choose **Line options** for its sides, straight/right-angle/curved route, endpoint symbols, weight, solid/dashed/dotted style, or a double line. **Edit bends** opens point editing for straight/curved connections; drag a middle segment of a right-angle connection to adjust its route. **Label** adds or edits connection text.
@@ -55,11 +57,11 @@ Shapes, text, hierarchy, and connection settings autosave with the board and are
 
 ## Connect cloud sync
 
-This checkout is already configured for the browser-safe endpoint of your Supabase project, and its schema has been applied. Google sign-in needs the one-time provider setup below. Email accounts remain available as an alternative. The steps below also cover moving the app to another project.
+This checkout is already configured for the browser-safe endpoint of your Supabase project. Rerun the latest schema below when upgrading an existing project. Google sign-in needs the one-time provider setup below. Email accounts remain available as an alternative. The steps below also cover moving the app to another project.
 
 1. Create or select a **free Supabase project**.
 2. Run [`supabase/schema.sql`](supabase/schema.sql) in its SQL Editor. It creates account-isolated folders, boards, asset metadata, optimistic-save RPC, and a private image bucket. It is safe to rerun.
-   For existing projects upgrading to v0.2.0, rerun this schema to add stable `created_at` values for folders and boards. New items retain their offline creation date when synced. Earlier releases did not record creation time, so older items use their earliest available saved timestamp; their exact original creation date cannot be recovered. The app remains compatible with the previous schema while you apply the update, but creation dates will not sync consistently between devices until it is applied.
+   For existing projects, rerun this schema to update stable `created_at` values and estimated-date tracking for folders and boards. New items retain their offline creation date when synced; renaming, moving, or editing does not change it. Earlier releases did not record creation time, so older items use their earliest available saved timestamp as an estimated creation date; their exact original creation date cannot be recovered. The app labels this limitation when sorting older items by creation date. The app remains compatible with the previous schema while you apply the update, but creation-date metadata will not sync consistently between devices until it is applied. This checkout does not apply SQL to the remote project automatically.
 3. The deployment owner configures the project URL and browser-safe publishable/anon key in `src/config.ts` or through `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build time. Users only sign in through Settings → Cloud sync; they cannot edit the connection there. Old per-browser connection overrides are ignored.
 4. Set the site URL and redirect allowlist in Supabase Authentication → URL Configuration.
 5. Choose **Continue with Google** after configuring the Google provider below. It creates or signs into your Note account and requests permission to store images in your own Drive. Alternatively choose Use email instead. Your Note account is separate from the Supabase dashboard account.
@@ -69,11 +71,15 @@ The publishable/anon key is public by design and remains discoverable in the bro
 
 Device boards stay separate when signing in. Use Settings → Cloud sync → Copy this device’s boards into my account to migrate them intentionally. Signing out returns to the device workspace.
 
+## Versions
+
+`package.json` is the version source. `src/lib/version.ts` shares it with the app; `public/about.html` and `public/updates.html` include static version labels and release notes. Update those labels and the root version in `package-lock.json` together when making a release. `scripts/check-version.mjs` checks consistency before development, asset preparation, and production builds. The informational pages remain readable without JavaScript.
+
 ## Google Drive images
 
 ### Public Google sign-in branding
 
-Public informational pages are served without sign-in or JavaScript: `about.html`, `privacy.html`, and `terms.html`. These pages identify Note, describe Google permissions and operator access, and provide the user-approved support contact. Privacy and terms are also linked in the app and sign-in dialog.
+Public informational pages are served without sign-in or JavaScript: `about.html`, `updates.html`, `privacy.html`, and `terms.html`. These pages identify Note, describe Google permissions and operator access, and provide the user-approved support contact. Privacy and terms are also linked in the app and sign-in dialog.
 
 For this deployment, use app name **Note**, support email **renz.r.salvador@gmail.com**, homepage **https://augustof2022.github.io/notes/about.html**, privacy policy **https://augustof2022.github.io/notes/privacy.html**, and terms **https://augustof2022.github.io/notes/terms.html**. Keep the authorized domains `augustof2022.github.io` and `wrkoxjlzdeiffdtgbyvq.supabase.co`. Logo upload is optional; `public/icon-192.png` is the existing square Note icon. Save Branding before opening Audience → Publish app. If Google requests domain or brand verification, complete that separately; a saved form does not confirm verification or production status. Publishing public sign-in requires the app owner's confirmation.
 
@@ -117,12 +123,14 @@ GitHub Free requires a public repository for Pages; a private repository require
 | Paste image / text | Ctrl+V |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
 | Duplicate selected object | Ctrl+D |
+| Add diagram child | Tab |
+| Add diagram sibling | Shift+Tab |
 | Add text | T |
 | Pan | Space+drag |
 | Zoom | Ctrl+scroll |
 | Shortcut guide | ? |
 
-Cmd replaces Ctrl on Mac. Browser-reserved Ctrl+N and Ctrl+Shift+N are avoided.
+Cmd replaces Ctrl on Mac. Diagram branch shortcuts apply only to a selected diagram node or its label while diagram mode is active. Browser-reserved Ctrl+N and Ctrl+Shift+N are avoided.
 
 ## Backups and limits
 

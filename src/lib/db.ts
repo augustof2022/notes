@@ -9,11 +9,27 @@ class NoteDB extends Dexie {
   constructor() {
     super('note-canvas-v1');
     this.version(1).stores({ folders: '&key, scope, id, parentId', boards: '&key, scope, id, folderId', assets: '&key, scope, id' });
-    this.version(2).stores({}).upgrade(async transaction => {
-      // Earlier releases did not record creation time. Preserve the earliest
-      // known timestamp so later edits cannot change the creation sort order.
+    this.version(2).stores({ folders: '&key, scope, id, parentId', boards: '&key, scope, id, folderId', assets: '&key, scope, id' }).upgrade(async transaction => {
+      // Older records only kept their last edit time. Freeze that estimate once;
+      // later edits must not keep changing the apparent creation date.
       for (const name of ['folders', 'boards']) await transaction.table(name).toCollection().modify(record => {
-        record.createdAt ||= record.updatedAt;
+        if (!record.createdAt || !Number.isFinite(Date.parse(record.createdAt))) {
+          record.createdAt = Number.isFinite(Date.parse(record.updatedAt)) ? record.updatedAt : undefined;
+          record.createdAtEstimated = true;
+        }
+      });
+    });
+    this.version(3).stores({}).upgrade(async transaction => {
+      // Version 2 was also shipped without a provenance flag. Its backfilled
+      // dates cannot be distinguished reliably from original creation times.
+      // Preserve every valid date and mark unflagged records as estimates.
+      for (const name of ['folders', 'boards']) await transaction.table(name).toCollection().modify(record => {
+        if (!record.createdAt || !Number.isFinite(Date.parse(record.createdAt))) {
+          record.createdAt = Number.isFinite(Date.parse(record.updatedAt)) ? record.updatedAt : undefined;
+          record.createdAtEstimated = true;
+        } else if (typeof record.createdAtEstimated !== 'boolean') {
+          record.createdAtEstimated = true;
+        }
       });
     });
   }
@@ -47,12 +63,14 @@ export function watchSettings(onChange: (settings: Settings) => void) {
 export const touch = () => ({ updatedAt: new Date().toISOString(), dirty: true });
 export async function newFolder(scope: string, name: string, parentId: string | null): Promise<Folder> {
   const id = crypto.randomUUID();
-  const folder: Folder = { key: recordKey(scope, id), id, scope, name, parentId, color: '#b6a5e5', createdAt: new Date().toISOString(), ...touch(), deleted: false, remoteRevision: 0 };
+  const timestamps = touch();
+  const folder: Folder = { key: recordKey(scope, id), id, scope, name, parentId, color: '#b6a5e5', ...timestamps, createdAt: timestamps.updatedAt, createdAtEstimated: false, deleted: false, remoteRevision: 0 };
   await db.folders.add(folder); return folder;
 }
 export async function newBoard(scope: string, name: string, folderId: string | null): Promise<Board> {
   const id = crypto.randomUUID();
-  const board: Board = { key: recordKey(scope, id), id, scope, name, folderId, elements: [], appState: { viewBackgroundColor: '#faf9f6', currentItemFontFamily: 2, currentItemRoughness: 0, currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...snapState('off') }, assetIds: [], preview: null, createdAt: new Date().toISOString(), ...touch(), deleted: false, remoteRevision: 0 };
+  const timestamps = touch();
+  const board: Board = { key: recordKey(scope, id), id, scope, name, folderId, elements: [], appState: { viewBackgroundColor: '#faf9f6', currentItemFontFamily: 2, currentItemRoughness: 0, currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...snapState('off') }, assetIds: [], preview: null, ...timestamps, createdAt: timestamps.updatedAt, createdAtEstimated: false, deleted: false, remoteRevision: 0 };
   await db.boards.add(board); return board;
 }
 export async function loadWorkspace(scope: string) {

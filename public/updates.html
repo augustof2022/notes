@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="See what's new in Note, including the current version and previous updates.">
+  <title>Version updates — Note</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./info.css">
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="brand" href="./about.html"><img src="./icon.svg" alt="" width="42" height="42">Note</a>
+      <nav aria-label="Site navigation"><a href="./">Open Note</a><a href="./privacy.html">Privacy policy</a><a href="./terms.html">Terms</a></nav>
+    </header>
+    <nav class="about-nav" aria-label="About Note"><a href="./about.html">Overview</a><a href="./updates.html" aria-current="page">Version updates</a></nav>
+    <main class="document release-history">
+      <span class="eyebrow">About Note</span>
+      <h1>Version updates</h1>
+      <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
+      <p>The latest version is <strong><span data-app-version>0.3.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <section class="release-card" aria-labelledby="release-current">
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.3.0</span></h2><span class="release-status">Latest</span></div>
+        <p class="updated"><time datetime="2026-10-17">October 17, 2026</time></p>
+        <h3>More canvas space and faster diagrams</h3>
+        <ul>
+          <li><strong>A collapsible sidebar.</strong> Hide the left menu from the header and restore it when you need it.</li>
+          <li><strong>Control your board toolbars.</strong> Show or hide board actions, drawing tools, navigation tools, and editing tools independently, or hide and restore them together. The header control stays accessible.</li>
+          <li><strong>One-key diagram branches.</strong> Select a diagram shape or type its label, then press Tab to add a child or Shift+Tab to add a sibling. Your current label is saved, the new shape copies its preset, size, and style, and typing starts in its label.</li>
+          <li><strong>Clearer creation dates.</strong> Older items keep an estimated creation date when an original date is unavailable. New items retain their creation date when edited, renamed, moved, imported, or synced.</li>
+          <li><strong>A dedicated version history.</strong> Read the current and earlier release notes from About → Version updates, including without JavaScript.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.2.4</strong><span>Unlock objects &amp; keep connector attachments</span></summary><p class="release-date"><time datetime="2026-10-16">October 16, 2026</time></p><ul><li>Use Unlock objects in the board controls to unlock a specific locked object or all locked objects, without selecting them on the canvas.</li><li>Unlock diagram labels and outlines together with their shape. Unlocking supports Undo.</li><li>Manually adjusted connector endpoints stay at the chosen point on a shape when it moves or resizes, including after reopening the board.</li><li>Preserve endpoint choices when changing connection routes. Use From/To side controls or drag an endpoint to deliberately change its attachment.</li></ul></details>
+        <details><summary><strong>v0.2.3</strong><span>Restore diagram actions</span></summary><p class="release-date"><time datetime="2026-10-16">October 16, 2026</time></p><ul><li>Activate diagram actions when selecting objects in a saved board, even when its contents load after the editor starts.</li><li>Restore diagram actions on desktop when no mobile style panel is covering the canvas.</li><li>Keep Add child, Add sibling, Add connection, and Edit shape available inside the mobile Edit panel, without floating over its controls.</li><li>Return the actions beside the selected object when the Edit panel closes.</li></ul></details>
+        <details><summary><strong>v0.2.2</strong><span>Simpler cloud settings</span></summary><p class="release-date"><time datetime="2026-10-16">October 16, 2026</time></p><ul><li>Cloud sync uses the connection configured for this Note deployment. Project URLs and public keys are no longer editable in Settings.</li><li>Ignore old connection overrides saved in the browser while keeping appearance, image storage, and OCR preferences.</li></ul></details>
+        <details><summary><strong>v0.2.1</strong><span>Mobile diagram editing fix</span></summary><p class="release-date"><time datetime="2026-10-16">October 16, 2026</time></p><ul><li>Hide floating diagram actions while the built-in mobile Edit panel is open, so they no longer cover stroke, fill, text, and other style controls.</li><li>Restore the diagram actions when the Edit panel closes, without requiring a new selection.</li></ul></details>
+        <details><summary><strong>v0.2.0</strong><span>Library organization &amp; diagram editing</span></summary><p class="release-date"><time datetime="2026-10-16">October 16, 2026</time></p><ul><li>Visible app version with a link to this update history.</li><li>Separate New folder and New board controls in the library.</li><li>Independent folder and board sorting by name, creation date, or last modification, in either direction. Sort choices stay on this device.</li><li>Creation dates recorded for new items. Older items use their earliest available saved date.</li><li>Change a selected diagram shape from the palette while keeping its text and connections. Choose the shape for a child or sibling before adding it.</li><li>Canvas object controls stay behind the diagram palette on mobile.</li></ul></details>
+        <details><summary><strong>v0.1.0</strong><span>Earlier version</span></summary><p>The existing Note canvas app: nested folders, local autosave, personal cloud sync, image and handwriting search, backups, and diagram libraries.</p></details>
+      </section>
+      <p>Need help with an update? Contact <a href="mailto:renz.r.salvador@gmail.com">renz.r.salvador@gmail.com</a> and include the version shown in your app.</p>
+    </main>
+    <footer class="site-footer">
+      <nav aria-label="Footer navigation"><a href="./about.html">About Note</a><a href="./privacy.html">Privacy policy</a><a href="./terms.html">Terms of service</a><a href="mailto:renz.r.salvador@gmail.com">Contact support</a></nav>
+      <p>Note is an independently maintained app. Google, GitHub, and Supabase provide services used by Note; they do not operate this app.</p>
+    </footer>
+  </div>
+</body>
+</html>
