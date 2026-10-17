@@ -19,10 +19,19 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.5.1</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.5.2</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.1</span></h2><span class="release-status">Latest</span></div>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.2</span></h2><span class="release-status">Latest</span></div>
         <p class="updated"><time datetime="2026-10-17">October 17, 2026</time></p>
+        <h3>Unblock boards on older cloud databases</h3>
+        <ul>
+          <li><strong>Compatible saves.</strong> When an older database is missing creation-date columns, save boards and folders with the same account access policies and revision checks. A missing date field no longer has to block an upload.</li>
+          <li><strong>Repair partial upgrades.</strong> Sync details links to a small SQL repair for missing date columns or broken creation-date triggers. Run it in your project’s Supabase SQL Editor, then sync again. Existing boards, files, revisions, and edit times are preserved.</li>
+          <li><strong>Safe reruns.</strong> The full setup script and focused repair now handle partially installed date fields and existing triggers. Unknown original dates stay labeled as estimates.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.5.1</strong><span>Faster sync with clear pending details</span></summary><p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Faster sync with clear pending details</h3>
         <ul>
           <li><strong>Know what is waiting.</strong> Use the question mark beside sync to see pending boards, folders, and images, their names, specific errors, and the last cloud check and completed sync. Failed saves show “Sync needs attention.”</li>
@@ -33,8 +42,7 @@
           <li><strong>Avoid false pending changes.</strong> Reordered cloud settings no longer count as new edits, and independent element edits with the same version number are recognized.</li>
           <li><strong>Keep edits safe.</strong> Keep the editor covered until its board loads and defer cloud refreshes while local edits are being saved. Preserve edits made during a request, recognize an already completed retry, keep genuine conflict copies, count pending Trash changes, and time out stalled cloud requests.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.5.0</strong><span>Arrange your board toolbars</span></summary>
         <p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Arrange your board toolbars</h3>

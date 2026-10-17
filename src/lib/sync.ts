@@ -5,6 +5,7 @@ import { db, folderPath, touch } from './db';
 import { blobToDataURL, dataURLToBlob } from './assets';
 import { downloadDriveImage, uploadDriveImage } from './drive';
 import { imageReady, pendingSyncItems, pendingSyncLabel, syncErrorMessage } from './sync-status';
+import { saveCloudRecord } from './sync-save';
 
 type CloudRow = Record<string, any>;
 const validDate = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -125,7 +126,7 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
       report(`Uploading ${kind} “${record.name}”…`);
       const creation = creationFromCloud({}, record);
       const payload = { id: record.id, ...recordData(record), created_at: creation.createdAt || record.updatedAt, created_at_estimated: creation.createdAt ? creation.createdAtEstimated : true };
-      const { data, error } = await client.rpc('save_note', { p_kind: kind, p_record: payload, p_expected_revision: record.remoteRevision });
+      const { data, error } = await saveCloudRecord(client, scope, kind, payload, record.remoteRevision, assertCurrent);
       assertCurrent();
       let saved = data;
       if (error) {
