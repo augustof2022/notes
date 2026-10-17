@@ -2,14 +2,14 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.4.0**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.4.1**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
 - Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor. Pen strokes use fixed pressure, and text mode stays active for consecutive notes.
 - Board snapping: tap **Snap: Off → Elements → Grid → Off** in the canvas controls. Elements shows alignment guides and snaps nearby edges, centers, and spacing while dragging. Grid shows a visible grid and snaps placement to its cells. Tap the adjacent size button to adjust each board’s grid from 1–100 pixels (default 20); the mode and size are saved with the board. Existing items stay in place until moved. Pen strokes remain freehand.
 - Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
-- Hide or restore the left sidebar from the header. In a board, **Hide tools / Show tools** in the header minimize or restore all four floating toolbars. The labeled **Toolbars** menu controls board actions, drawing tools, navigation tools, and editing tools independently, or hides/restores them together. These visibility preferences stay on the browser; the restore control remains in the header.
+- Hide or restore the left sidebar from the header. Each board toolbar has its own **minus (−)** button. Minimize it directly and use its labeled restore tab to bring it back. Other toolbars stay available. In a board, **Hide tools / Show tools** in the header minimize or restore all four floating toolbars. The labeled **Toolbars** menu controls board actions, drawing tools, navigation tools, and editing tools independently, or hides/restores them together. These visibility preferences stay on the browser; the restore control remains in the header.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
 - Nested folders with rename, move, drag into another folder, and recoverable Trash. Library sections have separate New folder and New board actions. Folders and boards sort independently by name (A–Z/Z–A), creation date, or last modification (newest/oldest); choices are remembered on the device and also order the sidebar.
 - Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.

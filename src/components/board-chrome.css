@@ -14,12 +14,8 @@
 .board-canvas[data-chrome-actions="false"]>.diagram-quick-actions,
 .board-canvas[data-chrome-actions="false"] .diagram-inline-actions{display:none!important}
 
-/* On desktop, the drawing toolbar also contains navigation buttons. Preserve
-   those buttons when only drawing tools are hidden. Mobile has separate groups. */
-.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar label.ToolIcon:has(input[data-testid^="toolbar-"]:not([data-testid="toolbar-hand"])),
-.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__extra-tools-trigger,
-.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__extra-tools-dropdown,
-.board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar__divider,
+/* Minimize whole visible toolbars. Desktop pan and tool lock live in drawing. */
+.board-canvas[data-chrome-drawing="false"] .excalidraw .shapes-section,
 .board-canvas[data-chrome-drawing="false"] .excalidraw .HintViewer,
 .board-canvas[data-chrome-drawing="false"] .excalidraw .App-toolbar--mobile{display:none!important}
 
@@ -27,9 +23,6 @@
 .board-canvas[data-chrome-navigation="false"] .excalidraw .default-sidebar-trigger,
 .board-canvas[data-chrome-navigation="false"] .excalidraw .layer-ui__library,
 .board-canvas[data-chrome-navigation="false"] .excalidraw .sidebar,
-.board-canvas[data-chrome-navigation="false"] .excalidraw .ToolIcon__lock,
-.board-canvas[data-chrome-navigation="false"] .excalidraw .ToolIcon__penMode,
-.board-canvas[data-chrome-navigation="false"] .excalidraw label.ToolIcon:has(input[data-testid="toolbar-hand"]),
 .board-canvas[data-chrome-navigation="false"] .excalidraw .zoom-actions,
 .board-canvas[data-chrome-navigation="false"] .excalidraw .scroll-back-to-content{display:none!important}
 
@@ -43,3 +36,44 @@
 
 .board-canvas[data-chrome-drawing="false"][data-chrome-navigation="false"] .excalidraw .shapes-section,
 .board-canvas[data-chrome-drawing="false"][data-chrome-navigation="false"] .excalidraw .App-top-bar{display:none!important}
+
+.note-toolbar-minimize-slot{flex-shrink:0;pointer-events:auto}
+.note-toolbar-minimize-control{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.note-toolbar-minimize-control>span{margin-right:auto;color:var(--muted);font:500 11px 'DM Sans',sans-serif}
+.board-canvas .note-toolbar-minimize-button{display:inline-flex;align-items:center;justify-content:center;width:32px;min-width:32px;height:32px;min-height:32px;padding:0;border-radius:6px;background:var(--panel);color:var(--muted);border:1px solid var(--line);cursor:pointer}
+.board-canvas .note-toolbar-minimize-button:hover{background:var(--accent-light);color:var(--accent)}
+.note-toolbar-minimize-slot[data-toolbar-group="drawing"]{margin-bottom:4px}
+.excalidraw:not(.excalidraw--mobile) .note-toolbar-navigation-host{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;align-self:flex-start;gap:4px}
+.excalidraw:not(.excalidraw--mobile) .note-toolbar-navigation-host>.sidebar-trigger__label-element{align-self:flex-end}
+.note-toolbar-minimize-slot[data-toolbar-group="navigation"][data-layout="desktop"]{display:inline-flex}
+.note-toolbar-minimize-slot[data-toolbar-group="editing"][data-layout="desktop"]{align-self:center;margin-left:5px}
+.excalidraw .undo-redo-buttons:has(>.note-toolbar-minimize-slot){grid-template-columns:36px 36px auto;overflow:visible}
+.note-toolbar-minimize-slot[data-toolbar-group="editing"][data-layout="mobile"]{margin-left:6px}
+.note-toolbar-minimize-slot[data-toolbar-group="navigation"][data-layout="mobile"]{padding:3px 2px;border-bottom:1px solid var(--line)}
+.board-canvas:has(>.excalidraw--mobile) .note-toolbar-minimize-slot[data-toolbar-group="drawing"] .note-toolbar-minimize-button{width:44px;height:40px;min-height:40px}
+.board-canvas:has(>.excalidraw--mobile)[data-chrome-drawing="true"] .mobile-misc-tools-container{top:calc(5rem - var(--editor-container-padding) + 44px)}
+.board-canvas:has(>.excalidraw--mobile) .mobile-misc-tools-container:has(>.note-toolbar-minimize-slot){min-width:40px;align-items:center}
+.board-canvas:has(>.excalidraw--mobile)>.canvas-tools{position:relative;left:auto;bottom:auto}
+.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.note-toolbar-minimize-slot{position:absolute;right:4px;bottom:4px}
+.board-canvas:has(>.excalidraw--mobile) .note-toolbar-minimize-slot[data-layout="mobile"] .note-toolbar-minimize-button{min-height:40px}
+.board-canvas[data-chrome-actions="false"] .note-toolbar-minimize-slot[data-toolbar-group="actions"],
+.board-canvas[data-chrome-drawing="false"] .note-toolbar-minimize-slot[data-toolbar-group="drawing"],
+.board-canvas[data-chrome-navigation="false"] .note-toolbar-minimize-slot[data-toolbar-group="navigation"],
+.board-canvas[data-chrome-editing="false"] .note-toolbar-minimize-slot[data-toolbar-group="editing"]{display:none!important}
+.note-toolbar-restore{position:absolute;z-index:5;pointer-events:auto}
+.note-toolbar-restore button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted);box-shadow:var(--shadow);font:500 11px 'DM Sans',sans-serif;white-space:nowrap;cursor:pointer}
+.note-toolbar-restore button:hover{background:var(--accent-light);color:var(--accent)}
+.note-toolbar-restore-actions{bottom:20px;left:50%;transform:translateX(-50%)}
+.note-toolbar-restore-drawing{top:16px;left:50%;transform:translateX(-50%)}
+.note-toolbar-restore-navigation{top:16px;right:16px}
+.note-toolbar-restore-editing{bottom:14px;left:14px}
+.board-canvas:has(>.excalidraw--mobile)>.note-toolbar-restore-actions{position:static;order:-1;align-self:center;transform:none;margin:8px 12px}
+.excalidraw--mobile>.note-toolbar-restore-navigation{top:128px;right:0}
+.board-canvas[data-chrome-drawing="false"] .excalidraw--mobile>.note-toolbar-restore-navigation{top:60px}
+.board-canvas[data-chrome-drawing="true"] .excalidraw:not(.excalidraw--mobile)>.note-toolbar-restore-navigation{top:128px}
+.board-canvas[data-chrome-navigation="true"] .excalidraw:not(.excalidraw--mobile)>.note-toolbar-restore-editing{left:160px}
+.excalidraw--mobile>.note-toolbar-restore button,.board-canvas:has(>.excalidraw--mobile)>.note-toolbar-restore button{min-height:40px}
+.board-canvas:not(:has(>.excalidraw--mobile))>.canvas-tools,
+.board-canvas:not(:has(>.excalidraw--mobile))>.note-toolbar-restore-actions{bottom:72px}
+.board-canvas:not(:has(>.excalidraw--mobile))>.icon-stamp-status{bottom:136px}
+.board-canvas:has(>.excalidraw--mobile)[data-chrome-actions="false"][data-chrome-editing="false"]>.icon-stamp-status{bottom:68px}
