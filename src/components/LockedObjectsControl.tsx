@@ -10,7 +10,7 @@ export function LockedObjectsControl({ api, root }: { api: ExcalidrawImperativeA
   const [objects, setObjects] = useState(() => lockedObjects(api.getSceneElements()));
   const [host, setHost] = useState<Element | null>(null);
   const [open, setOpen] = useState(false);
-  useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
+  useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-unlock"]') || null); }, [root]);
   useEffect(() => {
     const update = () => {
       const next = lockedObjects(api.getSceneElements());
@@ -30,7 +30,7 @@ export function LockedObjectsControl({ api, root }: { api: ExcalidrawImperativeA
     root?.querySelector<HTMLElement>('.excalidraw')?.focus();
   }
   return <>
-    {host && objects.length > 0 && createPortal(<button className="locked-objects-trigger" aria-haspopup="dialog" onClick={() => setOpen(true)} title="Unlock objects without selecting them on the canvas"><UnlockKeyhole size={15} />Unlock objects ({objects.length})</button>, host)}
+    {host && objects.length > 0 && createPortal(<button className="locked-objects-trigger" aria-label={`Unlock objects (${objects.length})`} aria-haspopup="dialog" onClick={() => setOpen(true)} title="Unlock objects without selecting them on the canvas"><UnlockKeyhole size={15} /><span>Unlock objects ({objects.length})</span></button>, host)}
     {open && createPortal(<Modal title="Locked objects" onClose={() => setOpen(false)}>
       <p className="dialog-description">Locked objects cannot be selected normally. Unlock an object here to move or edit it again.</p>
       <div className="locked-objects-list">{objects.map(object => <div key={object.id}><span>{object.label}</span><button className="secondary-button" aria-label={`Unlock ${object.label}`} onClick={() => unlock([object])}>Unlock</button></div>)}</div>

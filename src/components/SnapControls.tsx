@@ -11,8 +11,8 @@ const descriptions = {
   grid: 'Move and draw along the grid. Tap to turn snapping off.',
 };
 
-export function SnapControls({ mode, size, onModeChange, onSizeChange }: {
-  mode: SnapMode; size: number; onModeChange: (mode: SnapMode) => void; onSizeChange: (size: number) => void;
+export function SnapControls({ mode, size, onModeChange, onSizeChange, controls = 'both' }: {
+  controls?: 'mode' | 'size' | 'both'; mode: SnapMode; size: number; onModeChange: (mode: SnapMode) => void; onSizeChange: (size: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(size));
@@ -22,13 +22,13 @@ export function SnapControls({ mode, size, onModeChange, onSizeChange }: {
     setDraft(String(next)); onSizeChange(next);
   }
   return <>
-    <button className="snap-mode-button" aria-label={`Snapping: ${labels[mode]}. Switch to ${labels[nextSnapMode(mode)].toLowerCase()}`}
+    {controls !== 'size' && <button className="snap-mode-button" aria-label={`Snapping: ${labels[mode]}. Switch to ${labels[nextSnapMode(mode)].toLowerCase()}`}
       aria-pressed={mode !== 'off'} title={descriptions[mode]} onClick={() => onModeChange(nextSnapMode(mode))}>
       {mode === 'grid' ? <Grid2X2 size={15} /> : <Magnet size={15} />}<span aria-live="polite">Snap: {labels[mode]}</span>
-    </button>
-    <button aria-label={`Grid settings: ${size} pixels`} aria-haspopup="dialog" onClick={() => { setDraft(String(size)); setEditing(true); }} title="Adjust this board’s grid size">
+    </button>}
+    {controls !== 'mode' && <button aria-label={`Grid settings: ${size} pixels`} aria-haspopup="dialog" onClick={() => { setDraft(String(size)); setEditing(true); }} title="Adjust this board’s grid size">
       <SlidersHorizontal size={15} /><span>{size} px</span>
-    </button>
+    </button>}
     {editing && createPortal(<Modal title="Board grid" onClose={() => setEditing(false)}>
       <p className="dialog-description">Set the space between grid lines for this board. Your size is remembered in every snap mode. The grid appears when Snap: Grid is on.</p>
       <div className="grid-size-controls">

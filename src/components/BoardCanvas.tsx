@@ -9,6 +9,8 @@ import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLo
 import { ReadTextDialog } from './ReadTextDialog';
 import { PenWidthPanel } from './PenWidthPanel';
 import { SnapControls } from './SnapControls';
+import { FloatingToolbar } from './FloatingToolbar';
+import { DrawingToolbar } from './DrawingToolbar';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
@@ -200,13 +202,18 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
-    {api && <div className="canvas-tools" role="group" aria-label="Board controls"><button aria-pressed={viewLocked} onClick={() => {
-      const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
-      setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
-    }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</button>
-      <button onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} />Read text</button>
-      <SnapControls mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} />
-      </div>}
+    {api && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
+      { id: 'stamps', title: 'Icon stamps' },
+      { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
+        const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
+        setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
+      }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}<span>{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</span></button> },
+      { id: 'read-text', title: 'Read text', content: <button aria-label="Read text" title="Read text on this board" onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} /><span>Read text</span></button> },
+      { id: 'snap', title: 'Snapping', content: <SnapControls controls="mode" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
+      { id: 'grid', title: 'Grid size', content: <SnapControls controls="size" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
+      { id: 'diagrams', title: 'Diagrams' }, { id: 'unlock', title: 'Unlock objects' },
+    ]} />}
+    {api && <DrawingToolbar api={api} root={canvasRoot} />}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && <LockedObjectsControl api={api} root={canvasRoot} />}

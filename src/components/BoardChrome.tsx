@@ -33,8 +33,8 @@ export const BoardChrome = forwardRef<BoardChromeHandle, { root: HTMLElement | n
       const mobile = canvas?.classList.contains('excalidraw--mobile');
       const library = canvas?.querySelector('.default-sidebar-trigger')?.closest('.sidebar-trigger__label-element');
       const targets: Record<BoardChromeGroup, Element | null | undefined> = {
-        actions: root.querySelector(':scope > .canvas-tools'),
-        drawing: canvas?.querySelector(mobile ? '.App-toolbar--mobile' : '.shapes-section .App-toolbar'),
+        actions: null,
+        drawing: null,
         navigation: mobile ? canvas?.querySelector('.mobile-misc-tools-container') : library?.parentElement,
         editing: canvas?.querySelector(mobile ? '.App-bottom-bar .App-toolbar-content' : '.undo-redo-buttons'),
       };
@@ -73,32 +73,42 @@ export const BoardChrome = forwardRef<BoardChromeHandle, { root: HTMLElement | n
     };
   }, [root, visibility]);
 
+  useLayoutEffect(() => {
+    if (!root) return;
+    const change = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail && (detail.group === 'actions' || detail.group === 'drawing') && typeof detail.visible === 'boolean') toggleGroup(detail.group, detail.visible);
+    };
+    root.addEventListener('note:toolbar-visibility', change);
+    return () => root.removeEventListener('note:toolbar-visibility', change);
+  }, [root]);
+
   function update(next: typeof visibility) { setVisibility(next); saveBoardChrome(next); }
   function toggleGroup(key: BoardChromeGroup, visible: boolean) {
     setVisibility(previous => { const next = { ...previous, [key]: visible }; saveBoardChrome(next); return next; });
     requestAnimationFrame(() => root?.querySelector<HTMLButtonElement>(visible
-      ? `.note-toolbar-minimize-slot[data-toolbar-group="${key}"] button`
-      : `.note-toolbar-restore[data-toolbar-group="${key}"] button`)?.focus({ preventScroll: true }));
+      ? key === 'actions' || key === 'drawing' ? `.floating-toolbar-${key} .floating-toolbar-minimize` : `.note-toolbar-minimize-slot[data-toolbar-group="${key}"] button`
+      : key === 'actions' || key === 'drawing' ? `.floating-toolbar-restore-${key} button` : `.note-toolbar-restore[data-toolbar-group="${key}"] button`)?.focus({ preventScroll: true }));
   }
   return <>
     {groups.map(({ key, title }) => slots[key] && createPortal(<div className="note-toolbar-minimize-control">
       {key === 'drawing' && <span>{title}</span>}
       <button type="button" className="note-toolbar-minimize-button" aria-label={`Minimize ${title.toLowerCase()}`} title={`Minimize ${title.toLowerCase()}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); toggleGroup(key, false); }}><Minus size={17} /></button>
     </div>, slots[key]!, key))}
-    {groups.map(({ key, title }) => !visibility[key] && (key === 'actions' ? root : editor) && createPortal(<div className={`note-toolbar-restore note-toolbar-restore-${key}`} data-toolbar-group={key}>
+    {groups.filter(({ key }) => key === 'navigation' || key === 'editing').map(({ key, title }) => !visibility[key] && editor && createPortal(<div className={`note-toolbar-restore note-toolbar-restore-${key}`} data-toolbar-group={key}>
       <button type="button" aria-label={`Restore ${title.toLowerCase()}`} title={`Restore ${title.toLowerCase()}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); toggleGroup(key, true); }}><Maximize2 size={14} /><span>{title}</span></button>
-    </div>, (key === 'actions' ? root : editor)!, `restore-${key}`))}
+    </div>, editor!, `restore-${key}`))}
     {host && createPortal(<button className="board-chrome-quick-toggle" aria-label={anyVisible ? 'Hide all board toolbars' : 'Show all board toolbars'} title={anyVisible ? 'Minimize all four board toolbars' : 'Restore all four board toolbars'} onClick={() => update(anyVisible ? { actions: false, drawing: false, navigation: false, editing: false } : { ...BOARD_CHROME_DEFAULTS })}>
       {anyVisible ? <EyeOff size={16} /> : <Eye size={16} />}<span>{anyVisible ? 'Hide tools' : 'Show tools'}</span>
     </button>, host)}
     {opened && createPortal(<Modal title="Board toolbars" onClose={() => setOpened(false)}>
-    <p className="dialog-description">Each toolbar has a minus button to minimize it and a labeled tab to restore it. Use Hide tools or Show tools in the header for all four together. This menu stays available with the sidebar hidden. Your layout is remembered on this browser.</p>
+    <p className="dialog-description">Each toolbar has a minus button to minimize it and a labeled tab to restore it. Use Hide tools or Show tools in the header for all four together. This menu stays available with the sidebar hidden. Drag the grip on Board actions or Drawing tools to move it, or drag its right edge to resize it. Use ⋮ More to arrange controls. Your layout is remembered on this browser.</p>
     <div className="board-chrome-options">{groups.map(({ key, title, description }) => <label key={key}>
       <input type="checkbox" checked={visibility[key]} onChange={event => update({ ...visibility, [key]: event.target.checked })} />
       <span><strong>{title}</strong><small>{description}</small></span>
     </label>)}</div>
     <div className="board-chrome-presets"><button className="secondary-button" onClick={() => update({ ...BOARD_CHROME_DEFAULTS })}>Show all</button>
-      <button className="secondary-button" onClick={() => update({ actions: false, drawing: false, navigation: false, editing: false })}>Hide all</button></div>
+      <button className="secondary-button" onClick={() => update({ actions: false, drawing: false, navigation: false, editing: false })}>Hide all</button><button className="secondary-button" onClick={() => root?.dispatchEvent(new Event('note:toolbar-reset'))}>Reset toolbar layouts</button></div>
     <div className="dialog-actions"><button className="primary-button" onClick={() => setOpened(false)}>Done</button></div>
   </Modal>, document.body)}
   </>;

@@ -79,7 +79,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const chosen = selection.node || selection.edge;
   const live = useRef({ enabled, panel, placing, sourceId, connection, system, presetId, baseStyle });
   live.current = { enabled, panel, placing, sourceId, connection, system, presetId, baseStyle };
-  useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
+  useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-diagrams"]') || null); }, [root]);
   useLayoutEffect(() => {
     if (!root) return;
     let target: Element | null = null, slot: HTMLDivElement | null = null;
@@ -366,7 +366,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>;
   const actionLabel = selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions';
   return <>
-    {host && createPortal(<button className="diagram-mode-button" aria-pressed={enabled} onClick={() => { manuallyExited.current = false; setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} />Diagrams</button>, host)}
+    {host && createPortal(<button className="diagram-mode-button" aria-label="Diagrams" aria-pressed={enabled} onClick={() => { manuallyExited.current = false; setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} /><span>Diagrams</span></button>, host)}
     {showActions && (mobileActionSlot ? createPortal(<div className="diagram-inline-actions" role="group" aria-label={actionLabel}>{actions}</div>, mobileActionSlot)
       : actionPosition && snapshot.state.openMenu !== 'canvas' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={actionLabel}>{actions}</div>)}
     {(placing || sourceId) && <div className="diagram-operation" role="status" style={{ top: editorTop + 72 }}>

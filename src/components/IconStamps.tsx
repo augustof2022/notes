@@ -19,7 +19,7 @@ export function IconStamps({ api, root, onMessage }: { api: ExcalidrawImperative
   const nativeStamp = useRef(false);
   const live = useRef({ preferences, opened, active }); live.current = { preferences, opened, active };
   const chosen = stampIcon(preferences.iconId), Icon = chosen.icon;
-  useLayoutEffect(() => { setHost(root?.querySelector('.canvas-tools') || null); }, [root]);
+  useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-stamps"]') || null); }, [root]);
   useEffect(() => api.onChange((_elements, state) => {
     const stamping = state.activeTool.type === 'custom' && state.activeTool.customType === STAMP_TOOL;
     const leaving = nativeStamp.current && !stamping;
