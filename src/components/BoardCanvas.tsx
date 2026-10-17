@@ -12,6 +12,7 @@ import { SnapControls } from './SnapControls';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
+import { IconStamps } from './IconStamps';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
@@ -209,6 +210,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && <LockedObjectsControl api={api} root={canvasRoot} />}
+    {api && <IconStamps api={api} root={canvasRoot} onMessage={onMessage} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;

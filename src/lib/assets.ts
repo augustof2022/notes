@@ -2,6 +2,7 @@ import type { BinaryFileData, BinaryFiles } from '@excalidraw/excalidraw/types';
 import { db } from './db';
 import type { Asset } from '../types';
 import { recordKey } from '../types';
+import { isIconStampFile } from './icon-stamps';
 
 export async function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = () => reject(new Error('Could not read image.')); reader.readAsDataURL(blob); });
@@ -24,7 +25,7 @@ export async function storeSceneFiles(scope: string, files: BinaryFiles, ocrEnab
     let blob: Blob;
     try { blob = await compactImage(file.dataURL); } catch { blob = await dataURLToBlob(file.dataURL); }
     const asset: Asset = { key, id: file.id, scope, dataURL: await blobToDataURL(blob), mimeType: blob.type || file.mimeType,
-      created: file.created, storage: null, remotePath: null, ocrText: '', ocrStatus: ocrEnabled ? 'pending' : 'failed', dirty: true };
+      created: file.created, storage: null, remotePath: null, ocrText: '', ocrStatus: isIconStampFile(file.id) ? 'done' : ocrEnabled ? 'pending' : 'failed', dirty: true };
     await db.assets.put(asset); added.push(asset);
   }
   return added;

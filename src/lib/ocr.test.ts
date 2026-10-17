@@ -32,3 +32,12 @@ it('keeps failed images saved and recovers after an explicit retry', async () =>
   mock.recognize.mockResolvedValue({ data: { text: 'Recovered' } }); await queueOcr(image, { force: true });
   expect((await db.assets.get(image.key))?.ocrStatus).toBe('done');
 });
+it('does not run text recognition or show OCR messages for generated icon stamps', async () => {
+  const { queueOcr, needsImageOcr, onOcrStatus } = await import('./ocr');
+  const icon = asset({ id: 'note-icon-v1-clarify-7c3aed', key: 'local:note-icon-v1-clarify-7c3aed' });
+  await db.assets.put(icon);
+  const notify = vi.fn(), off = onOcrStatus(notify);
+  expect(needsImageOcr(icon)).toBe(false);
+  await queueOcr(icon, { force: true }); off();
+  expect(mock.createWorker).not.toHaveBeenCalled(); expect(notify).not.toHaveBeenCalled();
+});

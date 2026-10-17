@@ -1,6 +1,7 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
 import { db } from './db';
 import type { Asset } from '../types';
+import { isIconStampFile } from './icon-stamps';
 let workerPromise: Promise<Worker> | null = null;
 let chain = Promise.resolve();
 export const OCR_VERSION = 2;
@@ -9,7 +10,7 @@ const listeners = new Set<(text: string) => void>();
 function notify(text: string) { for (const listener of listeners) listener(text); }
 export function onOcrStatus(callback: (text: string) => void) { listeners.add(callback); return () => { listeners.delete(callback); }; }
 export function needsImageOcr(asset: Asset) {
-  return !!asset.dataURL && (asset.ocrStatus === 'pending' || (asset.ocrStatus === 'done' && !asset.ocrText.trim() && (asset.ocrVersion || 0) < OCR_VERSION));
+  return !isIconStampFile(asset.id) && !!asset.dataURL && (asset.ocrStatus === 'pending' || (asset.ocrStatus === 'done' && !asset.ocrText.trim() && (asset.ocrVersion || 0) < OCR_VERSION));
 }
 function getWorker() {
   if (!workerPromise) {
@@ -27,6 +28,7 @@ async function readableImage(dataURL: string) {
   return canvas;
 }
 export function queueOcr(asset: Asset, options: { force?: boolean } = {}): Promise<void> {
+  if (isIconStampFile(asset.id)) return Promise.resolve();
   const existing = jobs.get(asset.key); if (existing) return existing;
   const job = chain.then(async () => {
     const current = await db.assets.get(asset.key);

@@ -238,6 +238,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   function beginConnection() {
     const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
     if (!node) return;
+    root?.dispatchEvent(new Event('note:diagram-placement'));
     setPanel(false); setPlacing(false); setSourceId(node.id); setPointer(null);
     api.updateScene({ appState: { openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER });
     api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair');
@@ -260,6 +261,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     commitAdded(added, edge.id, false);
   }
   useEffect(() => {
+    const cancelStampConflict = () => cancelOperation();
+    root?.addEventListener('note:icon-stamp', cancelStampConflict);
     const up = api.onPointerUp((_tool, _down, event) => {
       if (!live.current.placing && !live.current.sourceId) return;
       const state = api.getAppState();
@@ -280,7 +283,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     const move = (event: PointerEvent) => { if (live.current.sourceId && root) { const bounds = root.getBoundingClientRect(); setPointer([event.clientX - bounds.left, event.clientY - bounds.top]); } };
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && (live.current.placing || live.current.sourceId)) cancelOperation(); };
     root?.addEventListener('pointermove', move); document.addEventListener('keydown', key);
-    return () => { up(); root?.removeEventListener('pointermove', move); document.removeEventListener('keydown', key); api.resetCursor(); };
+    return () => { up(); root?.removeEventListener('note:icon-stamp', cancelStampConflict); root?.removeEventListener('pointermove', move); document.removeEventListener('keydown', key); api.resetCursor(); };
   }, [api, root]);
 
   function applyStyle(patch: Partial<DiagramStyle>) {
@@ -373,7 +376,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     </div>}
     {sourceId && start && pointer && <svg className="diagram-connection-preview" aria-hidden="true"><path d={`M${start[0]} ${start[1]} L${pointer[0]} ${pointer[1]}`} /></svg>}
     {panel && <DiagramPanel system={system} presetId={presetId} onSystemChange={value => { setSystem(value); setPresetId(DIAGRAM_SYSTEMS.find(item => item.id === value)!.presets[0].id); setConnection(defaults(value)); activeDiagram.current = null; api.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER }); }} onPresetChange={setPresetId} onApplyShape={applyShape} pendingRelation={pendingRelation} onConfirmRelated={() => { if (pendingRelation) addRelated(pendingRelation); }} onCancelRelated={() => setPendingRelation(null)}
-      onAddShape={() => { setPanel(false); setSourceId(null); setPlacing(true); api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair'); }}
+      onAddShape={() => { root?.dispatchEvent(new Event('note:diagram-placement')); setPanel(false); setSourceId(null); setPlacing(true); api.setActiveTool({ type: 'selection' }); api.setCursor('crosshair'); }}
       selectedNode={selection.node && selectedData?.kind === 'node' ? { id: selection.node.id, label: labelOf(snapshot.elements, selection.node), shapeId: selectedData.shapeId, parentId: selectedData.parentId } : null} selectedEdge={!!selection.edge}
       onAddSibling={() => chooseRelated('sibling')} onAddChild={() => chooseRelated('child')} onConnect={beginConnection} onEditLabel={() => { if (chosen) editLabel(chosen); }} connecting={!!sourceId} onCancelConnection={cancelOperation}
       connection={selectedConnection} onConnectionChange={applyConnection} style={selectedStyle} onStyleChange={applyStyle} onTheme={applyTheme} onClose={closePanel} onExit={() => { manuallyExited.current = true; closePanel(); setEnabled(false); cancelOperation(); }} />}

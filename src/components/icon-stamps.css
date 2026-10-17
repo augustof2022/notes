@@ -1,0 +1,29 @@
+.icon-stamp-controls{display:flex;align-items:center;border-left:1px solid var(--line);padding-left:4px}
+.canvas-tools .icon-stamp-trigger{gap:6px}.canvas-tools .icon-stamp-picker-trigger{padding-left:7px;padding-right:7px;min-width:32px}
+.icon-stamp-trigger kbd{font-size:9px}.icon-stamp-trigger>span{max-width:95px;overflow:hidden;text-overflow:ellipsis}
+.icon-stamp-search{display:flex;flex-direction:row;align-items:center;gap:10px;color:var(--muted);margin:0 0 14px}
+.icon-stamp-search input{min-width:0;flex:1}
+.icon-stamp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:34dvh;overflow:auto;padding:3px}
+.icon-stamp-grid button{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;border:1px solid var(--line);border-radius:9px;padding:13px 8px;min-height:108px;text-align:center}
+.icon-stamp-grid button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-light);box-shadow:0 0 0 1px var(--accent)}
+.icon-stamp-grid strong{font-size:12px;font-weight:550}.icon-stamp-grid small{font-size:10px;line-height:1.5;color:var(--muted)}
+.icon-stamp-settings{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:18px;margin-top:18px}
+.icon-stamp-settings fieldset{border:0;padding:0;margin:0}.icon-stamp-settings legend,.icon-stamp-settings>label{font-size:12px;font-weight:550}
+.icon-stamp-colors{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:10px}
+.icon-stamp-colors button,.icon-stamp-colors input{width:30px;height:30px;min-height:30px;border:2px solid var(--panel);border-radius:7px;box-shadow:0 0 0 1px var(--line);padding:0}
+.icon-stamp-colors button[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:2px}
+.modal .icon-stamp-colors input[type="color"]{width:32px;height:32px;min-height:32px;padding:2px;flex-shrink:0}
+.icon-stamp-settings>label{display:flex;flex-direction:row;align-items:center;gap:10px;margin:0}.icon-stamp-settings select{min-height:40px;min-width:100px}
+.icon-stamp-repeat{display:flex;flex-direction:row;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:15px;margin-top:17px;font-size:12px}
+.icon-stamp-repeat input{width:18px;height:18px;accent-color:var(--accent);flex-shrink:0}.icon-stamp-repeat small{display:block;font-size:10px;font-weight:400;line-height:1.6;color:var(--muted);margin-top:4px}
+.icon-stamp-preview{display:flex;align-items:center;gap:12px;margin-top:15px;padding:12px;border:1px solid var(--line);border-radius:9px}
+.icon-stamp-preview>span{flex:1}.icon-stamp-preview strong{font-size:13px}.icon-stamp-preview small{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.icon-stamp-status{position:absolute;z-index:4;bottom:82px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;max-width:calc(100% - 24px);padding:9px 12px;background:var(--panel);border:1px solid var(--accent);border-radius:9px;box-shadow:var(--shadow);font-size:12px}
+.icon-stamp-status>svg{flex-shrink:0}.icon-stamp-status>span{line-height:1.5}.icon-stamp-status button{display:grid;place-items:center;min-width:32px;min-height:32px;border-radius:6px}
+.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.icon-stamp-controls{grid-column:1/-1;justify-content:center;border-left:0;border-top:1px solid var(--line);padding:4px 0 0}
+.board-canvas:has(>.excalidraw--mobile)>.icon-stamp-status{bottom:80px;font-size:11px}
+.board-canvas[data-chrome-actions="false"][data-chrome-editing="false"]>.icon-stamp-status{bottom:20px}
+@media(max-width:560px){.icon-stamp-grid{grid-template-columns:repeat(3,minmax(0,1fr));max-height:30dvh}.icon-stamp-grid button{padding:10px 5px;min-height:100px}.icon-stamp-colors button,.icon-stamp-colors input{width:32px;height:32px}.icon-stamp-settings{gap:12px}.icon-stamp-status{width:max-content}}
+.modal:has(.icon-stamp-picker-body){display:flex;flex-direction:column;overflow:hidden}
+.modal:has(.icon-stamp-picker-body)>.modal-heading,.modal:has(.icon-stamp-picker-body)>.dialog-actions{flex-shrink:0}
+.icon-stamp-picker-body{min-height:0;overflow:auto;padding:3px}
