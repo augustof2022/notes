@@ -18,3 +18,14 @@ it('allows longer image uploads and honors caller cancellation', async () => {
   await vi.advanceTimersByTimeAsync(45000); expect(vi.getTimerCount()).toBe(1);
   controller.abort(new Error('Stopped by caller')); await result; expect(vi.getTimerCount()).toBe(0);
 });
+
+it.each([true, false])('preserves body cancellation with native signal combination: %s', async native => {
+  if (!native) vi.stubGlobal('AbortSignal', {});
+  const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream()));
+  vi.stubGlobal('fetch', fetchMock);
+  const controller = new AbortController();
+  const response = await cloudFetch('https://www.googleapis.com/drive/v3/files/image?alt=media', { signal: controller.signal });
+  expect(response.body).not.toBeNull();
+  controller.abort();
+  expect((fetchMock.mock.calls[0][1].signal as AbortSignal).aborted).toBe(true);
+});

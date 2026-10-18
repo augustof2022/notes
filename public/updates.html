@@ -19,18 +19,27 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.5.2</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.5.3</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.2</span></h2><span class="release-status">Latest</span></div>
-        <p class="updated"><time datetime="2026-10-17">October 17, 2026</time></p>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.3</span></h2><span class="release-status">Latest</span></div>
+        <p class="updated"><time datetime="2026-10-18">October 18, 2026</time></p>
+        <h3>See images load across devices</h3>
+        <ul>
+          <li><strong>Open the board right away.</strong> Show notes and cached images first. Retrieve missing images three at a time and display each as it arrives.</li>
+          <li><strong>Know what is happening.</strong> A loading count and persistent image errors show above the canvas and in Sync details. The header shows when images are loading or need attention, separately from board uploads.</li>
+          <li><strong>Recover without reopening.</strong> Retry images directly, or let Drive reconnect, Sync now, returning online, and newly received image details retry them. A board revision does not need to change. PNG export waits for missing files or explains a download failure.</li>
+          <li><strong>Keep downloads on this device.</strong> Cache retrieved images, share duplicate requests, and use cached files when reopening or offline. Stop stalled downloads with a retryable timeout, and explain Drive access or missing-file errors.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.5.2</strong><span>Unblock boards on older cloud databases</span></summary><p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Unblock boards on older cloud databases</h3>
         <ul>
           <li><strong>Compatible saves.</strong> When an older database is missing creation-date columns, save boards and folders with the same account access policies and revision checks. A missing date field no longer has to block an upload.</li>
           <li><strong>Repair partial upgrades.</strong> Sync details links to a small SQL repair for missing date columns or broken creation-date triggers. Run it in your project’s Supabase SQL Editor, then sync again. Existing boards, files, revisions, and edit times are preserved.</li>
           <li><strong>Safe reruns.</strong> The full setup script and focused repair now handle partially installed date fields and existing triggers. Unknown original dates stay labeled as estimates.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.5.1</strong><span>Faster sync with clear pending details</span></summary><p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Faster sync with clear pending details</h3>
         <ul>

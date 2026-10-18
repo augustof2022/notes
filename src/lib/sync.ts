@@ -60,16 +60,39 @@ async function changedBoards(client: SupabaseClient, scope: string) {
   for (let index = 0; index < changed.length; index += 100) rows.push(...await allRows(client, 'note_boards', scope, '*', changed.slice(index, index + 100)));
   return rows;
 }
+const imageDownloads = new WeakMap<SupabaseClient, Map<string, Promise<Asset>>>();
 export async function downloadAsset(client: SupabaseClient, asset: Asset): Promise<Asset> {
-  if (asset.dataURL || !asset.remotePath) return asset;
-  let blob: Blob;
-  if (asset.storage === 'drive') blob = await downloadDriveImage(asset.remotePath, asset.scope);
-  else {
-    const { data, error } = await client.storage.from('note-images').download(asset.remotePath);
-    if (error) throw error; blob = data;
-  }
-  const dataURL = await blobToDataURL(blob);
-  await db.assets.update(asset.key, { dataURL }); return { ...asset, dataURL };
+  const current = await db.assets.get(asset.key) || asset;
+  if (current.dataURL) return current;
+  if (!current.remotePath || !current.storage) throw new Error('This image has not finished uploading. Sync Note on the device where you added it.');
+  let requests = imageDownloads.get(client);
+  if (!requests) { requests = new Map(); imageDownloads.set(client, requests); }
+  const key = JSON.stringify([current.key, current.storage, current.remotePath]);
+  const existing = requests.get(key); if (existing) return existing;
+  const controller = new AbortController();
+  const timeoutError = new Error('This image download timed out. Check your connection and choose Retry images.');
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(timeoutError); }, 90000); });
+  const work = async () => {
+    let blob: Blob;
+    if (current.storage === 'drive') blob = await downloadDriveImage(current.remotePath!, current.scope, controller.signal);
+    else {
+      const { data, error } = await client.storage.from('note-images').download(current.remotePath!, {}, { signal: controller.signal });
+      if (error) throw error; blob = data;
+    }
+    if (!blob.size || (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream')) throw new Error('The downloaded file is not a usable image. Check the original file in its image storage.');
+    const dataURL = await blobToDataURL(blob);
+    if (controller.signal.aborted) throw timeoutError;
+    // Do not overwrite a newer cloud location that arrived during the download.
+    await db.transaction('rw', db.assets, async () => {
+      const latest = await db.assets.get(current.key);
+      if (latest?.remotePath === current.remotePath && latest.storage === current.storage) await db.assets.update(current.key, { dataURL });
+    });
+    return { ...current, dataURL };
+  };
+  const request = Promise.race([work(), timeout]).finally(() => { clearTimeout(timer); requests!.delete(key); });
+  requests.set(key, request);
+  return request;
 }
 class SyncCancelled extends Error {}
 export interface SyncResult { complete: boolean; downloaded: boolean; pending: number; conflicts: number; deferred: boolean }

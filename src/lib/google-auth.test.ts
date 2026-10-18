@@ -65,6 +65,33 @@ describe('Google login and private Drive ownership', () => {
     await useGoogleDriveSession(null); resolveProfile(json({ sub: 'google-user-a' }));
     expect(await checking).toBe(false); expect(driveConnected()).toBe(false);
   });
+  it('shares in-progress Drive verification so every caller sees the connected result', async () => {
+    let resolveProfile!: (response: Response) => void;
+    const profile = new Promise<Response>(resolve => { resolveProfile = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(profile).mockResolvedValue(json({ user: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const first = useGoogleDriveSession(session()), second = useGoogleDriveSession(session());
+    resolveProfile(json({ sub: 'google-user-a' }));
+    expect(await Promise.all([first, second])).toEqual([true, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('waits for an in-progress reconnect before retrieving an image', async () => {
+    let resolveProfile!: (response: Response) => void;
+    const profile = new Promise<Response>(resolve => { resolveProfile = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(profile).mockResolvedValueOnce(json({ user: {} })).mockResolvedValueOnce(new Response(new Blob(['image'], { type: 'image/png' })));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection = useGoogleDriveSession(session());
+    const image = downloadDriveImage('image', 'note-user-a');
+    resolveProfile(json({ sub: 'google-user-a' }));
+    expect(await connection).toBe(true);
+    expect((await image).size).toBe(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it.each([403, 404, 429, 503])('explains a Drive image retrieval failure (%s)', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ sub: 'google-user-a' })).mockResolvedValueOnce(json({ user: {} })).mockResolvedValueOnce(json({}, status)));
+    await useGoogleDriveSession(session());
+    await expect(downloadDriveImage('image', 'note-user-a')).rejects.toThrow(status === 403 ? 'denied access' : status === 404 ? 'not found' : status === 429 ? 'limiting requests' : 'temporarily unavailable');
+  });
   it('requires reconnection after the Google access window expires', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-10T00:00:00Z'));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ sub: 'google-user-a' })).mockResolvedValueOnce(json({ user: {} })));

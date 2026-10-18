@@ -21,8 +21,8 @@ import { installLockedPan } from '../lib/locked-pan';
 import { db, touch } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
-import { downloadAsset } from '../lib/sync';
-import { recordKey } from '../types';
+import { useBoardImages } from './useBoardImages';
+import { boardImageIds, type BoardImageState } from '../lib/board-images';
 import { sceneSignature } from '../lib/canvas-signature';
 
 export interface CanvasHandle {
@@ -39,7 +39,7 @@ function cleanAppState(state: AppState): Board['appState'] {
     currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemFontSize: state.currentItemFontSize,
     gridStep: state.gridStep, ...restoreSnapping(state) };
 }
-export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, jumpId }, ref) {
+export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; onImageState: (state: BoardImageState) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, onImageState, jumpId }, ref) {
   const [ready, setReady] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
@@ -64,19 +64,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (canvasRoot && api) return installLockedPan(canvasRoot, api, () => !!viewLock.current);
   }, [canvasRoot, api]);
   const latest = useRef({ settings, onSaved, onMessage }); latest.current = { settings, onSaved, onMessage };
-  async function loadFiles() {
-    if (client) {
-      for (const id of board.assetIds) {
-        const asset = await db.assets.get(recordKey(board.scope, id));
-        if (asset && !asset.dataURL) {
-          try { await downloadAsset(client, asset); }
-          catch (error) { onMessage(error instanceof Error ? error.message : 'Could not load an image. Reconnect storage and try again.'); }
-        }
-      }
-    }
-    return localSceneFiles(board.scope, board.assetIds);
-  }
-  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => loadFiles().then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
+  const reloadImages = useBoardImages(api, ready, board.key, board.scope, client, onImageState);
+  // Open text and cached images immediately; remote files arrive progressively.
+  const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => localSceneFiles(board.scope, boardImageIds(board.elements)).then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
   async function flush() {
     if (timer.current) clearTimeout(timer.current);
     const snapshot = pending.current; pending.current = null;
@@ -149,9 +139,11 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo, hasPendingChanges,
     toggleControls: () => chrome.current?.toggle(),
-    reloadImages: async () => { const files = await loadFiles(); api?.addFiles(Object.values(files)); },
+    reloadImages,
     exportPng: async () => {
       await flush(); if (!api || !api.getSceneElements().length) return null;
+      await reloadImages();
+      if (boardImageIds(api.getSceneElements()).some(id => !api.getFiles()[id])) throw new Error('Some board images could not load. Use Retry images before exporting a PNG.');
       return exportToBlob({ elements: api.getSceneElements(), appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: settings.theme === 'dark' }, files: api.getFiles(), mimeType: 'image/png' });
     }
   }), [api, settings.theme]);
@@ -208,7 +200,6 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       lastSignature.current = signature;
       viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
       api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
-      void loadFiles().then(files => api.addFiles(Object.values(files))).catch(error => onMessage(String(error)));
     }).catch(error => onMessage(String(error)));
     return () => { alive = false; };
   }, [board.remoteRevision]);

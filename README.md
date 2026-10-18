@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.5.2**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.5.3**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
@@ -73,6 +73,8 @@ This checkout is already configured for the browser-safe endpoint of your Supaba
 4. Set the site URL and redirect allowlist in Supabase Authentication → URL Configuration.
 5. Choose **Continue with Google** after configuring the Google provider below. It creates or signs into your Note account and requests permission to store images in your own Drive. Alternatively choose Use email instead. Your Note account is separate from the Supabase dashboard account.
 6. Sign in on another device to see your cloud boards. Changes trigger a sync after about 2 seconds without edits. While Note is open, devices check the cloud every 15 seconds and refresh when focused, reopened, or reconnected. Revision checks download only changed boards after the first sync. Ctrl+S or the header status flushes the open canvas and runs a manual sync; a request during an existing sync queues a fresh pass. Sign in to the same Note account on both devices. Newly pasted images must finish uploading and saving their cloud location before their board publishes; OCR text can finish later. A failed item does not stop other uploads or cloud downloads. Use **? beside sync → Sync details** (also **Settings → Cloud sync → View sync details**) to see the names and reasons for waiting boards, folders, images, or Trash changes and retry with **Sync now**. A completed sync means no local uploads are waiting and the cloud check succeeded. Backgrounded or sleeping browsers may pause timers; returning to Note checks again.
+
+Board sync transfers notes and image locations; image files download on demand when you open a board. Notes and cached images open first, then up to three missing files load at a time. The board’s image notice and **Sync details → Images on this board** show progress and persistent reasons for failed downloads. Use **Retry images**, or **Reconnect Google Drive** with the same Google account when requested. Sync now, successful Drive reconnection, returning online or to the app, and late-arriving image metadata also retry missing files, even when the board’s revision is unchanged. Downloads stay cached in this browser, so reopening and offline use can show images already retrieved. First-load time depends on file sizes, connection speed, and storage availability; stalled downloads time out after 90 seconds and can be retried. A missing or inaccessible file in Drive needs its original account/file access restored. PNG export waits for missing files and reports a loading failure instead of silently exporting placeholders. The v0.5.3 image-loading changes need no additional SQL update.
 
 The publishable/anon key is public by design and remains discoverable in the browser bundle and network requests. Removing it from Settings prevents accidental edits; it does not make it secret. Account authorization and Supabase row-level security protect notes and storage. A secret or service-role key must never be shipped to the browser. Keeping the public key entirely off the client would require a server-mediated architecture, which GitHub Pages alone cannot provide.
 
