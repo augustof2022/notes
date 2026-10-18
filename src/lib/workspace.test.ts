@@ -2,9 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { db, newBoard, newFolder, descendantFolderIds, canMoveFolder, folderPath, loadWorkspace, trashFolder, touch } from './db';
 import { searchBoards } from './search';
-import { preserveConflict } from './sync';
 import type { Asset, Board, Folder } from '../types';
-import { recordKey } from '../types';
 afterEach(async () => { await Promise.all([db.folders.clear(), db.boards.clear(), db.assets.clear()]); });
 describe('workspace hierarchy and scoped search', () => {
   it('records creation times for folders and boards independently of later edits', async () => {
@@ -65,19 +63,6 @@ describe('workspace hierarchy and scoped search', () => {
     expect((await loadWorkspace('local')).boards.map(x => x.id)).toEqual([outside.id]);
     expect((await db.boards.get(board.key))?.deleted).toBe(true);
     expect(await db.boards.count()).toBe(2);
-  });
-  it('preserves local board contents and image references in a conflict copy', async () => {
-    const original = await newBoard('user-a', 'My board', null);
-    original.assetIds = ['image']; original.remoteRevision = 3;
-    original.elements = [{ id: 'text', type: 'text', text: 'Unsynced local work' }] as unknown as Board['elements'];
-    const copy = preserveConflict(original);
-    expect(copy.id).not.toBe(original.id);
-    expect(copy.name).toBe('My board (conflict copy)');
-    expect(copy.elements).toEqual(original.elements);
-    expect(copy.assetIds).toEqual(['image']);
-    expect(copy.remoteRevision).toBe(0);
-    expect(copy.dirty).toBe(true);
-    expect(copy.key).toBe(recordKey('user-a', copy.id));
   });
   it('handles malformed cycles without hanging when computing folder paths', () => {
     const folders = [{ id: 'a', parentId: 'b' }, { id: 'b', parentId: 'a' }] as Folder[];

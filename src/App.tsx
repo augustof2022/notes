@@ -7,7 +7,7 @@ import { recordKey } from './types';
 import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, seedLocal, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
 import { getSupabase } from './lib/supabase';
 import { appConfig } from './config';
-import { downloadAsset, importLocalWorkspace, syncWorkspace } from './lib/sync';
+import { downloadAsset, importLocalWorkspace, resolveSyncConflict, syncWorkspace } from './lib/sync';
 import { createSyncRunner, SYNC_IDLE_MS, SYNC_POLL_MS } from './lib/sync-runner';
 import { pendingSyncItems, pendingSyncLabel } from './lib/sync-status';
 import { SyncDetails } from './components/SyncDetails';
@@ -18,6 +18,9 @@ import { needsImageOcr, onOcrStatus, queueOcr } from './lib/ocr';
 import { searchBoards } from './lib/search';
 import { BoardCanvas, type CanvasHandle } from './components/BoardCanvas';
 import { Modal } from './components/Modal';
+import { BoardThumbnail } from './components/BoardThumbnail';
+import { DeleteTrashDialog } from './components/DeleteTrashDialog';
+import { permanentDelete, trashSelection, type TrashSelection } from './lib/trash';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { readOAuthReturn } from './lib/oauth-return';
 import { LibrarySort } from './components/LibrarySort';
@@ -50,6 +53,7 @@ export default function App() {
   const [librarySorts, setLibrarySorts] = useState(readLibrarySorts);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [trash, setTrash] = useState<(Board | Folder)[]>([]);
+  const [deleteTrash, setDeleteTrash] = useState<{ scope: string; selection: TrashSelection; empty: boolean } | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [jumpId, setJumpId] = useState<string>();
@@ -123,11 +127,11 @@ export default function App() {
   useEffect(() => {
     setFolderId(null); setBoardId(null); setWorkspace({ folders: [], boards: [] }); setAssets([]); setView('library');
     setSyncStatus(scope === 'local' ? 'Saved on this device' : 'Ready to sync');
-    setLastChecked(null); setLastSynced(null); setBoardImages(null); setSyncDetails(false); setSyncing(false); dirtyVersions.current.clear();
+    setLastChecked(null); setLastSynced(null); setBoardImages(null); setDeleteTrash(null); setSyncDetails(false); setSyncing(false); dirtyVersions.current.clear();
     clearTimeout(idleSyncTimer.current);
     const subscription = liveQuery(async () => ({
       workspace: await loadWorkspace(scope), assets: await db.assets.where('scope').equals(scope).toArray(),
-      trash: [...await db.folders.where('scope').equals(scope).filter(x => x.deleted).toArray(), ...await db.boards.where('scope').equals(scope).filter(x => x.deleted).toArray()]
+      trash: [...await db.folders.where('scope').equals(scope).filter(x => x.deleted && !x.purged).toArray(), ...await db.boards.where('scope').equals(scope).filter(x => x.deleted && !x.purged).toArray()]
     })).subscribe({ next: data => { setWorkspace(data.workspace); setAssets(data.assets); setTrash(data.trash); }, error: error => message(`Device storage could not open: ${messageOf(error)}`) });
     return () => subscription.unsubscribe();
   }, [scope]);
@@ -140,8 +144,8 @@ export default function App() {
         // Every queued pass flushes again, including edits made during an upload.
         await canvasRef.current?.flush();
         let result = await syncWorkspace(client, scope, settings, text => { if (activeScope.current === scope) setSyncStatus(text); }, { isCurrent: () => activeScope.current === scope, isBoardBusy: key => canvasRef.current?.hasPendingChanges(key) || false });
-        if (result.conflicts) message('Your changes are saved in a conflict copy because another device edited the same item.');
-        // Drain successful in-flight edits and conflict copies without waiting
+        if (result.conflicts) message('This item was edited on two devices. Open Sync details to review which version to keep.');
+        // Drain successful in-flight edits and reconciled changes without waiting
         // for the polling timer. Failed items retain their explanation and retry
         // on the next poll or manual attempt rather than looping aggressively.
         for (let attempt = 0; attempt < 2 && result.downloaded && !result.deferred && result.pending > 0 && activeScope.current === scope; attempt++) {
@@ -150,7 +154,7 @@ export default function App() {
           const waiting = pendingSyncItems(boards, folders, images);
           if (!waiting.length || waiting.some(item => item.failed)) break;
           result = await syncWorkspace(client, scope, settings, text => { if (activeScope.current === scope) setSyncStatus(text); }, { isCurrent: () => activeScope.current === scope, isBoardBusy: key => canvasRef.current?.hasPendingChanges(key) || false });
-          if (result.conflicts) message('Your changes are saved in a conflict copy because another device edited the same item.');
+          if (result.conflicts) message('This item was edited on two devices. Open Sync details to review which version to keep.');
         }
         if (activeScope.current === scope) {
           if (result.downloaded) {
@@ -260,26 +264,50 @@ export default function App() {
     setMenuFor(null); message('Moved to Trash. You can restore it anytime.'); void sync();
   }
   async function restore(record: Board | Folder) {
-    const allFolders = await db.folders.where('scope').equals(scope).toArray();
+    const allFolders = await db.folders.where('scope').equals(scope).filter(folder => !folder.purged).toArray();
     const restoreFolder = async (id: string | null, visited = new Set<string>()) => {
       if (!id || visited.has(id)) return; visited.add(id);
       const folder = allFolders.find(x => x.id === id);
       if (folder?.deleted) { await restoreFolder(folder.parentId, visited); await db.folders.update(folder.key, { deleted: false, ...touch() }); }
     };
     await db.transaction('rw', db.folders, db.boards, async () => {
+      const current = await ('parentId' in record ? db.folders : db.boards).get(record.key);
+      if (!current?.deleted || current.purged) throw new Error('This item is no longer in Trash. Sync and try again.');
       if ('parentId' in record) {
         await restoreFolder(record.id);
         const descendants = descendantFolderIds(allFolders, record.id);
         for (const folder of allFolders.filter(x => descendants.has(x.id))) await db.folders.update(folder.key, { deleted: false, ...touch() });
         const boards = await db.boards.where('scope').equals(scope).toArray();
-        for (const board of boards.filter(x => x.folderId && descendants.has(x.folderId))) await db.boards.update(board.key, { deleted: false, ...touch() });
+        for (const board of boards.filter(x => !x.purged && x.folderId && descendants.has(x.folderId))) await db.boards.update(board.key, { deleted: false, ...touch() });
       } else { await restoreFolder(record.folderId); await db.boards.update(record.key, { deleted: false, ...touch() }); }
     });
     message('Restored to your library'); void sync();
   }
+  async function requestTrashDelete(record?: Board | Folder) {
+    await flushCanvas();
+    if (scope !== 'local') await sync();
+    if (activeScope.current !== scope) return;
+    const selection = await trashSelection(scope, record ? { kind: 'parentId' in record ? 'folder' : 'board', id: record.id } : undefined);
+    if (!selection.folders.length && !selection.boards.length) { message('Trash is already empty.'); return; }
+    setDeleteTrash({ scope, selection, empty: !record });
+  }
+  async function confirmTrashDelete() {
+    if (!deleteTrash || deleteTrash.scope !== activeScope.current) throw new Error('The active account changed. Open Trash and try again.');
+    await syncPromise.current;
+    await permanentDelete(deleteTrash.scope, deleteTrash.selection, client, { isCurrent: () => activeScope.current === deleteTrash.scope });
+    setDeleteTrash(null); message(deleteTrash.empty ? 'Trash emptied.' : 'Permanently deleted.');
+    void sync();
+  }
+  async function chooseSyncVersion(key: string, choice: 'local' | 'cloud', revision: number) {
+    await flushCanvas(); await syncPromise.current;
+    if (activeScope.current !== scope) throw new Error('The active account changed. Reopen Sync details.');
+    if (canvasRef.current?.hasPendingChanges(key)) throw new Error('Finish editing the board, then choose its version.');
+    await resolveSyncConflict(scope, key, choice, revision);
+    void sync();
+  }
   async function duplicate(board: Board) {
     await flushCanvas(); const current = await db.boards.get(board.key); if (!current) return;
-    const id = crypto.randomUUID(), createdAt = new Date().toISOString(); await db.boards.add({ ...current, id, key: recordKey(scope, id), name: `${current.name} (copy)`, remoteRevision: 0, createdAt, createdAtEstimated: false, updatedAt: createdAt, dirty: true });
+    const id = crypto.randomUUID(), createdAt = new Date().toISOString(); await db.boards.add({ ...current, purged: false, syncBase: undefined, syncConflict: undefined, syncError: undefined, id, key: recordKey(scope, id), name: `${current.name} (copy)`, remoteRevision: 0, createdAt, createdAtEstimated: false, updatedAt: createdAt, dirty: true });
     setMenuFor(null); message('Board duplicated'); void sync();
   }
   async function exportBackup() {
@@ -288,24 +316,24 @@ export default function App() {
       const { downloadAsset } = await import('./lib/sync');
       for (const asset of assets.filter(x => !x.dataURL)) await downloadAsset(client, asset);
     }
-    const backup = { format: 'note-backup', version: 1, exportedAt: new Date().toISOString(), folders: await db.folders.where('scope').equals(scope).toArray(), boards: await db.boards.where('scope').equals(scope).toArray(), assets: await db.assets.where('scope').equals(scope).toArray() };
+    const backup = { format: 'note-backup', version: 1, exportedAt: new Date().toISOString(), folders: await db.folders.where('scope').equals(scope).filter(item => !item.purged).toArray(), boards: await db.boards.where('scope').equals(scope).filter(item => !item.purged).toArray(), assets: await db.assets.where('scope').equals(scope).toArray() };
     download(`note-backup-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(backup)], { type: 'application/json' }));
     message('Backup exported, including your images');
   }
   async function importBackup(file: File) {
     const data = JSON.parse(await file.text());
     if (data.format !== 'note-backup' || data.version !== 1 || !Array.isArray(data.boards) || !Array.isArray(data.folders) || !Array.isArray(data.assets)) throw new Error('Choose a Note backup JSON file.');
-    const folderIds = new Map<string, string>(data.folders.map((x: Folder) => [x.id, crypto.randomUUID()]));
+    const folderIds = new Map<string, string>(data.folders.filter((item: Folder) => !item.purged).map((x: Folder) => [x.id, crypto.randomUUID()]));
     await db.transaction('rw', db.folders, db.boards, db.assets, async () => {
-      for (const folder of data.folders) {
+      for (const folder of data.folders.filter((item: Folder) => !item.purged)) {
         if (typeof folder.name !== 'string' || folder.name.length > 200) throw new Error('Invalid folder in backup.');
         const id = folderIds.get(folder.id)!;
-        await db.folders.put({ ...folder, id, scope, key: recordKey(scope, id), parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...importedCreation(folder), ...touch() });
+        await db.folders.put({ ...folder, purged: false, syncBase: undefined, syncConflict: undefined, syncError: undefined, id, scope, key: recordKey(scope, id), parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null, remoteRevision: 0, ...importedCreation(folder), ...touch() });
       }
-      for (const board of data.boards) {
+      for (const board of data.boards.filter((item: Board) => !item.purged)) {
         if (typeof board.name !== 'string' || !Array.isArray(board.elements) || !Array.isArray(board.assetIds)) throw new Error('Invalid board in backup.');
         const id = crypto.randomUUID();
-        await db.boards.put({ ...board, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...importedCreation(board), ...touch() });
+        await db.boards.put({ ...board, purged: false, syncBase: undefined, syncConflict: undefined, syncError: undefined, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...importedCreation(board), ...touch() });
       }
       for (const asset of data.assets) {
         if (typeof asset.id !== 'string' || typeof asset.dataURL !== 'string' || !asset.dataURL.startsWith('data:image/')) throw new Error('The backup has a missing or invalid image.');
@@ -361,7 +389,7 @@ export default function App() {
         {!workspace.folders.length && <p className="tree-empty">Make a folder for a project,<br />or a corner of your mind.</p>}
       </div>
       <div className="sidebar-bottom">
-        <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setView('trash'); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{trash.length > 0 && <span className="count">{trash.length}</span>}</button>
+        <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setFolderId(null); setView('trash'); setSidebarOpen(false); setMenuFor(null); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{trash.length > 0 && <span className="count">{trash.length}</span>}</button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'help' })}><Keyboard size={16} /><span>Keyboard shortcuts</span><kbd>?</kbd></button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'settings' })}><SettingsIcon size={16} /><span>Settings & storage</span></button>
         <nav className="legal-links" aria-label="About and policies"><a href="./about.html" target="_blank" rel="noreferrer">About</a><a href="./privacy.html" target="_blank" rel="noreferrer">Privacy</a><a href="./terms.html" target="_blank" rel="noreferrer">Terms</a></nav>
@@ -376,7 +404,7 @@ export default function App() {
       {needRefresh && <div className="update-banner"><span>A new version of Note is ready.</span><button onClick={() => void flushCanvas().then(() => updateServiceWorker(true)).catch(error => message(messageOf(error)))}>Save and update <RefreshCw size={13} /></button></div>}
       {currentImages && <BoardImageNotice state={currentImages} onRetry={() => void canvasRef.current?.reloadImages()} onReconnect={() => void signInWithGoogle().catch(error => message(messageOf(error)))} />}
       {currentBoard ? <div className="editor-container"><BoardCanvas key={currentBoard.key} ref={canvasRef} board={currentBoard} settings={settings} client={client} onSaved={() => { if (scope === 'local') setSyncStatus('Saved on this device'); }} onMessage={message} onImageState={imageStateChanged} jumpId={jumpId} /></div>
-        : view === 'trash' ? <section className="library"><div className="library-intro"><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore a board or folder whenever you need it.</p></div>{trash.length ? <div className="trash-list">{trash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
+        : view === 'trash' ? <section className="library"><div className="library-intro trash-heading"><div><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore an item, or delete it permanently.</p></div>{trash.length > 0 && <button className="secondary-button danger" onClick={() => void requestTrashDelete().catch(error => message(messageOf(error)))}><Trash2 size={15} />Empty Trash</button>}</div>{trash.length ? <div className="trash-list">{trash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><div className="trash-item-actions"><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button><button className="secondary-button danger" aria-label={`Delete ${record.name} permanently`} onClick={() => void requestTrashDelete(record).catch(error => message(messageOf(error)))}>Delete permanently</button></div></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
         : <section className="library"><div className="library-intro"><p className="eyebrow">YOUR SPACE TO THINK</p><div className="library-title"><h1>{currentFolder?.name || 'A little room for big ideas.'}</h1>{currentFolder && <button className="icon-button" aria-label="Rename current folder" onClick={() => setDialog({ kind: 'rename', record: currentFolder })}><MoreHorizontal size={22} /></button>}</div><p>{currentFolder ? 'Keep everything together. Give every thought a little space.' : 'Collect the things that spark something. Make sense of them here.'}</p></div>
           {scope === 'local' && <div className="sync-banner"><span className="banner-icon"><Cloud size={21} /></span><div><strong>Your ideas, wherever you are.</strong><p>{client ? 'Sign in to open your cloud boards on your other devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p></div>{client && <button onClick={() => setDialog({ kind: 'auth' })}>Sign in to sync <ArrowUpRight size={15} /></button>}</div>}
           <div className="section-heading library-section-heading"><h2>Folders <span>{directFolders.length}</span></h2><div className="library-actions"><LibrarySort label="Sort folders" value={librarySorts.folders} onChange={value => setLibrarySorts(previous => ({ ...previous, folders: value }))} /><button onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={15} /> New folder</button></div></div>
@@ -398,20 +426,13 @@ export default function App() {
     {dialog?.kind === 'move' && dialog.record && <MoveDialog record={dialog.record} folders={workspace.folders} onClose={() => setDialog(null)} onMove={destination => moveRecord(dialog.record!, destination)} />}
     {dialog?.kind === 'search' && <Modal title="Find anything" wide onClose={() => setDialog(null)}><div className="search-modal-input"><Search size={20} /><input autoFocus aria-label="Search notes and boards" placeholder="A word, an idea, a screenshot…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>Esc</kbd></div><div className="search-scope"><span>Search in</span><select aria-label="Search folder" value={searchFolderId || ''} onChange={event => setSearchFolderId(event.target.value || null)}><option value="">Entire workspace</option>{workspace.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(workspace.folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select><small>Includes all subfolders</small></div><div className="search-results">{!query.trim() ? <div className="search-empty"><Search size={26} /><p>Search board names, typed notes, image text, and saved handwriting text.</p></div> : matches.length ? matches.map((match, index) => <SearchResult key={`${match.board.id}:${match.elementId || 'title'}:${index}`} match={match} folders={workspace.folders} onOpen={() => void openBoard(match.board, match.elementId)} />) : <div className="search-empty"><p>No matches in this folder.</p><small>Try fewer words or choose Entire workspace.</small></div>}</div></Modal>}
     {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Stamp last icon', 'I'], ['Stop stamping', 'Esc'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
-    {syncDetails && session && <SyncDetails account={session.user.email || session.user.id} status={syncStatus} pending={pendingSync} syncing={syncing} lastChecked={lastChecked} lastSynced={lastSynced} images={currentImages} onRetryImages={() => void canvasRef.current?.reloadImages()} onSync={sync} onClose={() => setSyncDetails(false)} />}
+    {deleteTrash && <DeleteTrashDialog selection={deleteTrash.selection} empty={deleteTrash.empty} cloud={deleteTrash.scope !== 'local'} onClose={() => setDeleteTrash(null)} onDelete={confirmTrashDelete} />}
+    {syncDetails && session && <SyncDetails account={session.user.email || session.user.id} status={syncStatus} pending={pendingSync} syncing={syncing} lastChecked={lastChecked} lastSynced={lastSynced} conflicts={[...workspace.boards, ...workspace.folders, ...trash].filter(record => !!record.syncConflict)} onResolveConflict={chooseSyncVersion} images={currentImages} onRetryImages={() => void canvasRef.current?.reloadImages()} onSync={sync} onClose={() => setSyncDetails(false)} />}
     {dialog?.kind === 'settings' && <SettingsDialog cloudConfigured={!!client} settings={settings} session={session} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
     {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} initialError={authError} onGoogle={signInWithGoogle} onClose={() => { setDialog(null); setAuthError(''); }} onComplete={() => { setDialog(null); setAuthError(''); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
   </div>;
 }
 
-function BoardThumbnail({ board }: { board: Board }) {
-  const elements = board.elements.filter(x => !x.isDeleted);
-  if (!elements.length) return <div className="thumbnail-empty"><span className="paper-note"><span /><span /><span /></span><span className="paper-dot" /><span className="paper-dash" /></div>;
-  const minX = Math.min(...elements.map(x => x.x)), minY = Math.min(...elements.map(x => x.y));
-  const width = Math.max(300, ...elements.map(x => x.x + Math.abs(x.width) - minX));
-  const height = Math.max(180, ...elements.map(x => x.y + Math.abs(x.height) - minY));
-  return <svg className="scene-thumbnail" viewBox={`${minX - 20} ${minY - 20} ${width + 40} ${height + 40}`} aria-hidden="true">{elements.slice(0, 150).map(element => element.type === 'text' ? <text key={element.id} x={element.x} y={element.y + element.fontSize} fontSize={element.fontSize} fill={element.strokeColor}>{element.text.split('\n').slice(0, 6).map((line, index) => <tspan key={index} x={element.x} dy={index ? element.fontSize * 1.3 : 0}>{line}</tspan>)}</text> : element.type === 'image' ? <g key={element.id}><rect x={element.x} y={element.y} width={element.width} height={element.height} rx="8" fill="#e7e1f5" /><text x={element.x + 10} y={element.y + 24} fontSize="14" fill="#8b77bf">Screenshot</text></g> : element.type === 'ellipse' ? <ellipse key={element.id} cx={element.x + element.width / 2} cy={element.y + element.height / 2} rx={Math.abs(element.width / 2)} ry={Math.abs(element.height / 2)} stroke={element.strokeColor} fill={element.backgroundColor || 'none'} strokeWidth={2} /> : element.type === 'rectangle' || element.type === 'frame' ? <rect key={element.id} x={element.x} y={element.y} width={Math.abs(element.width)} height={Math.abs(element.height)} rx={8} stroke={element.strokeColor} fill={element.backgroundColor || 'none'} strokeWidth={2} /> : 'points' in element ? <polyline key={element.id} points={element.points.map(point => `${element.x + point[0]},${element.y + point[1]}`).join(' ')} stroke={element.strokeColor} fill="none" strokeWidth={element.strokeWidth} /> : null)}</svg>;
-}
 function NameDialog({ dialog, folderId, folders, onClose, onSubmit }: { dialog: { kind: string; record?: Board | Folder }; folderId: string | null; folders: Folder[]; onClose: () => void; onSubmit: (name: string) => Promise<void> }) {
   const [name, setName] = useState(dialog.record?.name || ''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   return <Modal title={dialog.kind === 'rename' ? 'Give it a name' : dialog.kind === 'folder' ? 'Make a little space' : 'Start a new board'} onClose={onClose}><form onSubmit={event => { event.preventDefault(); if (!name.trim()) { setError('Add a name first.'); return; } setBusy(true); void onSubmit(name.trim()).catch(error => { setError(messageOf(error)); setBusy(false); }); }}><p className="dialog-description">{dialog.kind === 'rename' ? 'A name that makes sense to you.' : `Inside ${folderPath(folders, folderId).map(x => x.name).join(' / ') || 'your workspace'}.`}</p><label>{dialog.kind === 'folder' ? 'Folder name' : 'Name'}<input value={name} maxLength={200} onChange={event => setName(event.target.value)} placeholder={dialog.kind === 'folder' ? 'e.g. Projects, Learning, Life' : 'e.g. Ideas worth keeping'} autoFocus /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : dialog.kind === 'rename' ? 'Save name' : dialog.kind === 'folder' ? 'Create folder' : 'Create board'}<ArrowUpRight size={16} /></button></div></form></Modal>;

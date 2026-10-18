@@ -75,7 +75,7 @@ export async function newBoard(scope: string, name: string, folderId: string | n
 }
 export async function loadWorkspace(scope: string) {
   const [folders, boards] = await Promise.all([db.folders.where('scope').equals(scope).toArray(), db.boards.where('scope').equals(scope).toArray()]);
-  return { folders: folders.filter(x => !x.deleted), boards: boards.filter(x => !x.deleted) };
+  return { folders: folders.filter(x => !x.deleted && !x.purged), boards: boards.filter(x => !x.deleted && !x.purged) };
 }
 export async function trashFolder(scope: string, id: string) {
   const { folders, boards } = await loadWorkspace(scope);

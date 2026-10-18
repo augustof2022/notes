@@ -19,10 +19,20 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.5.3</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.6.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.5.3</span></h2><span class="release-status">Latest</span></div>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.6.0</span></h2><span class="release-status">Latest</span></div>
         <p class="updated"><time datetime="2026-10-18">October 18, 2026</time></p>
+        <h3>One board across devices, with a complete Trash</h3>
+        <ul>
+          <li><strong>Viewing stays local.</strong> Panning, zooming, brush preferences, and image-loading details no longer count as competing board edits. Opening a folder or board on another device does not create a copy.</li>
+          <li><strong>Keep one board.</strong> Sync reconciles independent edits on the original board. If both devices changed the same content, Sync details lets you compare versions and choose which to keep. Extra boards are created only by your explicit Duplicate or import actions.</li>
+          <li><strong>Delete permanently or empty Trash.</strong> Review and confirm the items to remove. Synced deletion erases their saved content and retains an inert marker so an older offline device cannot restore the same ID. Shared image files stay in storage.</li>
+          <li><strong>Update every device.</strong> Load this version on both devices to stop older builds from creating conflict copies. The copy fix works with the existing cloud schema. Permanent Trash deletion needs the one-time permanent-trash SQL update in Supabase.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.5.3</strong><span>See images load across devices</span></summary><p class="release-date"><time datetime="2026-10-18">October 18, 2026</time></p>
         <h3>See images load across devices</h3>
         <ul>
           <li><strong>Open the board right away.</strong> Show notes and cached images first. Retrieve missing images three at a time and display each as it arrives.</li>
@@ -30,8 +40,7 @@
           <li><strong>Recover without reopening.</strong> Retry images directly, or let Drive reconnect, Sync now, returning online, and newly received image details retry them. A board revision does not need to change. PNG export waits for missing files or explains a download failure.</li>
           <li><strong>Keep downloads on this device.</strong> Cache retrieved images, share duplicate requests, and use cached files when reopening or offline. Stop stalled downloads with a retryable timeout, and explain Drive access or missing-file errors.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.5.2</strong><span>Unblock boards on older cloud databases</span></summary><p class="release-date"><time datetime="2026-10-17">October 17, 2026</time></p>
         <h3>Unblock boards on older cloud databases</h3>
         <ul>

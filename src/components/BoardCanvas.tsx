@@ -18,12 +18,13 @@ import { IconStamps } from './IconStamps';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
-import { db, touch } from '../lib/db';
+import { db } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
 import { useBoardImages } from './useBoardImages';
 import { boardImageIds, type BoardImageState } from '../lib/board-images';
 import { sceneSignature } from '../lib/canvas-signature';
+import { boardContentChanged, canvasSaveAnchor, reconcileCanvasSave } from '../lib/sync-merge';
 
 export interface CanvasHandle {
   flush: () => Promise<void>;
@@ -55,6 +56,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const [widthValue, setWidthValue] = useState(board.appState.currentItemStrokeWidth || DEFAULT_PEN_WIDTH);
   const initialSignature = useRef(sceneSignature(board.elements, board.appState));
   const lastSignature = useRef(initialSignature.current);
+  const saveAnchor = useRef(board);
   const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Board['appState']; files: BinaryFiles } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saving = useRef(Promise.resolve());
@@ -74,10 +76,20 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       savesInFlight.current++;
       saving.current = saving.current.catch(() => {}).then(async () => {
         const assets = await storeSceneFiles(board.scope, snapshot.files, latest.current.settings.ocrEnabled);
-        await db.boards.update(board.key, { elements: snapshot.elements, appState: snapshot.state,
-          assetIds: [...new Set(snapshot.elements.filter(x => x.type === 'image' && !x.isDeleted).map(x => x.type === 'image' ? x.fileId : null).filter((x): x is NonNullable<typeof x> => !!x))], ...touch() });
+        let edited = false;
+        await db.transaction('rw', db.boards, async () => {
+          const current = await db.boards.get(board.key);
+          if (!current || current.purged) return;
+          const scene = { elements: snapshot.elements, appState: snapshot.state,
+            assetIds: [...new Set(snapshot.elements.filter(x => x.type === 'image' && !x.isDeleted).map(x => x.type === 'image' ? x.fileId : null).filter((x): x is NonNullable<typeof x> => !!x))] };
+          const anchor = saveAnchor.current;
+          const next = reconcileCanvasSave(anchor, scene, current);
+          edited = boardContentChanged(current, next);
+          await db.boards.put(next);
+          saveAnchor.current = canvasSaveAnchor(anchor, next, scene);
+        });
         for (const asset of assets) if (latest.current.settings.ocrEnabled) queueOcr(asset);
-        latest.current.onSaved();
+        if (edited) latest.current.onSaved();
       }).catch(error => { pending.current ||= snapshot; latest.current.onMessage(`Could not save: ${error instanceof Error ? error.message : 'device storage is unavailable'}. Export your board before closing.`); throw error; }).finally(() => { savesInFlight.current--; });
     }
     await saving.current;
@@ -196,13 +208,16 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     void db.boards.get(board.key).then(current => {
       if (!alive || !current || current.dirty || current.remoteRevision !== board.remoteRevision || hasPendingChanges(board.key)) return;
       const signature = sceneSignature(board.elements, board.appState);
-      if (sceneSignature(current.elements, current.appState) !== signature || signature === lastSignature.current) return;
+      if (sceneSignature(current.elements, current.appState) !== signature || boardContentChanged(current, board)) return;
+      const displayed = { elements: api.getSceneElementsIncludingDeleted(), appState: api.getAppState() };
+      if (signature === lastSignature.current && !boardContentChanged(displayed, current)) { saveAnchor.current = current; return; }
       lastSignature.current = signature;
       viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
       api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
+      saveAnchor.current = current;
     }).catch(error => onMessage(String(error)));
     return () => { alive = false; };
-  }, [board.remoteRevision]);
+  }, [board.remoteRevision, board.elements, sceneSignature(board.elements, board.appState)]);
   return <div className="board-canvas" ref={setCanvasRoot} aria-busy={!ready} onKeyDownCapture={event => { if (!ready && event.key !== 'Tab') { event.preventDefault(); event.stopPropagation(); } }}>
     {!ready && <div className="canvas-loading"><Loader2 className="spinning" size={24} /> Opening your board…</div>}
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}

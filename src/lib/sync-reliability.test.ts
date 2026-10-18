@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Asset, Board } from '../types';
 import { db, newBoard, newFolder } from './db';
-import { syncWorkspace } from './sync';
+import { resolveSyncConflict, syncWorkspace } from './sync';
 import { pendingSyncItems } from './sync-status';
 vi.mock('./drive', () => ({ uploadDriveImage: vi.fn(), downloadDriveImage: vi.fn() }));
 const scope = 'owner';
@@ -93,13 +93,18 @@ it('recognizes an already committed retry instead of making duplicate conflict c
   expect(await db.boards.count()).toBe(1);
   expect(await db.boards.get(board.key)).toMatchObject({ dirty: false, remoteRevision: 1 });
 });
-it('keeps genuine concurrent edits in a conflict copy and uploads it on the next pass', async () => {
+it('keeps genuine concurrent edits on the same ID until an explicit version choice', async () => {
   const board = await newBoard(scope, 'Local change', null), server = cloud();
   server.rows.note_boards.set(board.id, remoteBoard(board, 'Changed on phone'));
   expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: false, conflicts: 1, pending: 1 });
-  expect((await db.boards.toArray()).map(row => row.name).sort()).toEqual(['Changed on phone', 'Local change (conflict copy)']);
+  expect(await db.boards.count()).toBe(1);
+  expect(await db.boards.get(board.key)).toMatchObject({ name: 'Local change', dirty: true, syncConflict: { revision: 1, data: { name: 'Changed on phone' } } });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: false, pending: 1 });
+  expect(server.rows.note_boards.size).toBe(1);
+  await resolveSyncConflict(scope, board.key, 'local');
   expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true });
-  expect(server.rows.note_boards.size).toBe(2);
+  expect(server.rows.note_boards.size).toBe(1);
+  expect(server.rows.note_boards.get(board.id).name).toBe('Local change');
 });
 it('syncs Trash changes even when their old image file is missing, and counts them as pending', async () => {
   const board = await newBoard(scope, 'Trashed board', null), server = cloud();
@@ -178,5 +183,121 @@ it('defers conflict replacement when more local edits arrive during the request'
   expect(await db.boards.get(board.key)).toMatchObject({ name: 'Local start', dirty: true, remoteRevision: 0 });
   await db.boards.update(board.key, { name: 'Latest local edit' }); busy = false;
   expect(await syncWorkspace(server.client, scope, settings, vi.fn(), { isBoardBusy: () => busy })).toMatchObject({ conflicts: 1 });
-  expect((await db.boards.toArray()).map(row => row.name).sort()).toEqual(['Latest local edit (conflict copy)', 'Phone version']);
+  expect(await db.boards.count()).toBe(1);
+  expect(await db.boards.get(board.key)).toMatchObject({ name: 'Latest local edit', syncConflict: { data: { name: 'Phone version' } } });
+});
+
+const element = (id: string, text = id, version = 1) => ({ id, type: 'text', text, x: 0, y: 0, version, versionNonce: version, updated: version, isDeleted: false });
+it('receives a real other-device edit over a legacy view-only dirty snapshot without making a board', async () => {
+  const board = await newBoard(scope, 'Shared board', null), server = cloud();
+  await db.boards.update(board.key, { elements: [element('a')] as unknown as Board['elements'] });
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  const before = await db.boards.get(board.key) as Board;
+  await db.boards.update(board.key, { appState: { ...before.appState, scrollX: 500, zoom: { value: 0.7 as any } }, dirty: true });
+  const remote = server.rows.note_boards.get(board.id);
+  server.rows.note_boards.set(board.id, { ...remote, elements: [element('a', 'Written on phone', 2)], revision: 2 });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true, conflicts: 0 });
+  expect(await db.boards.count()).toBe(1);
+  expect(await db.boards.get(board.key)).toMatchObject({ elements: [{ text: 'Written on phone' }], appState: { scrollX: 500, zoom: { value: 0.7 } }, remoteRevision: 2, dirty: false });
+});
+it('ignores file-loading status and element bookkeeping in an otherwise identical retry', async () => {
+  const board = await newBoard(scope, 'Image board', null), server = cloud();
+  const local = { ...board, elements: [{ ...element('image'), type: 'image', fileId: 'file', status: 'saved' }] as unknown as Board['elements'], appState: { ...board.appState, scrollX: 100 } };
+  await db.boards.put(local);
+  server.rows.note_boards.set(board.id, { ...remoteBoard(local), elements: [{ ...element('image', 'image', 8), type: 'image', fileId: 'file', status: 'pending' }], app_state: { ...board.appState, scrollX: 0 } });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true, conflicts: 0 });
+  expect(await db.boards.count()).toBe(1);
+});
+it('merges independent additions from two devices onto the same board ID', async () => {
+  const board = await newBoard(scope, 'Shared additions', null), server = cloud();
+  await db.boards.update(board.key, { elements: [element('base')] as unknown as Board['elements'] });
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  await db.boards.update(board.key, { elements: [element('base'), element('laptop')] as unknown as Board['elements'], dirty: true });
+  const remote = server.rows.note_boards.get(board.id);
+  server.rows.note_boards.set(board.id, { ...remote, elements: [element('base'), element('phone')], revision: 2 });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ conflicts: 0, pending: 1 });
+  expect(await db.boards.count()).toBe(1);
+  expect((await db.boards.get(board.key))?.elements.map(item => item.id)).toEqual(['base', 'laptop', 'phone']);
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true });
+  expect(server.rows.note_boards.size).toBe(1);
+  expect(server.rows.note_boards.get(board.id).elements.map((item: any) => item.id)).toEqual(['base', 'laptop', 'phone']);
+});
+it('retains both overlapping element edits until choosing cloud, with local viewing preferences retained', async () => {
+  const board = await newBoard(scope, 'Review edits', null), server = cloud();
+  await db.boards.update(board.key, { elements: [element('same')] as unknown as Board['elements'] });
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  await db.boards.update(board.key, { elements: [element('same', 'Laptop edit', 2)] as unknown as Board['elements'], appState: { ...board.appState, scrollY: 250 }, dirty: true });
+  const remote = server.rows.note_boards.get(board.id);
+  server.rows.note_boards.set(board.id, { ...remote, elements: [element('same', 'Phone edit', 2)], revision: 2, updated_at: '2026-10-18T00:00:00Z' });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: false, conflicts: 1, pending: 1 });
+  expect(await db.boards.get(board.key)).toMatchObject({ elements: [{ text: 'Laptop edit' }], syncConflict: { revision: 2, data: { elements: [{ text: 'Phone edit' }] } } });
+  await resolveSyncConflict(scope, board.key, 'cloud');
+  expect(await db.boards.get(board.key)).toMatchObject({ elements: [{ text: 'Phone edit' }], appState: { scrollY: 250 }, remoteRevision: 2, updatedAt: '2026-10-18T00:00:00Z', dirty: false });
+  expect(await db.boards.count()).toBe(1);
+});
+it('does not overwrite a newer cloud change after an explicit keep-local choice', async () => {
+  const board = await newBoard(scope, 'Laptop name', null), server = cloud();
+  server.rows.note_boards.set(board.id, remoteBoard(board, 'Phone name'));
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  await resolveSyncConflict(scope, board.key, 'local');
+  server.rows.note_boards.set(board.id, { ...remoteBoard(board, 'Newer phone name'), revision: 2 });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ conflicts: 1, complete: false });
+  expect(server.rows.note_boards.get(board.id).name).toBe('Newer phone name');
+  expect(await db.boards.get(board.key)).toMatchObject({ name: 'Laptop name', syncConflict: { revision: 2 } });
+  expect(await db.boards.count()).toBe(1);
+});
+it('receives purge tombstones over dirty busy editors without resurrecting content or conflicts', async () => {
+  const board = await newBoard(scope, 'Unsent local edit', null), server = cloud();
+  await db.boards.update(board.key, { dirty: true, remoteRevision: 1, syncConflict: { revision: 2, data: { name: 'Old conflict' } } });
+  server.rows.note_boards.set(board.id, { ...remoteBoard(board, ''), revision: 3, deleted: true, purged: true, elements: [], app_state: {}, asset_ids: [], folder_id: null });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn(), { isBoardBusy: () => true })).toMatchObject({ complete: true, pending: 0, conflicts: 0 });
+  const purged = await db.boards.get(board.key);
+  expect(purged).toMatchObject({ purged: true, deleted: true, name: '', elements: [], appState: {}, assetIds: [], dirty: false, remoteRevision: 3 });
+  expect(purged?.syncBase).toBeUndefined(); expect(purged?.syncConflict).toBeUndefined();
+  expect(server.rpc).not.toHaveBeenCalled();
+});
+it('merges a folder rename and another-device color change without creating folders', async () => {
+  const folder = await newFolder(scope, 'Original folder', null), server = cloud();
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  await db.folders.update(folder.key, { name: 'Laptop folder name', dirty: true });
+  const remote = server.rows.note_folders.get(folder.id);
+  server.rows.note_folders.set(folder.id, { ...remote, color: '#123456', revision: 2 });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ conflicts: 0, pending: 1 });
+  expect(await db.folders.count()).toBe(1);
+  expect(await db.folders.get(folder.key)).toMatchObject({ name: 'Laptop folder name', color: '#123456' });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true });
+  expect(server.rows.note_folders.size).toBe(1);
+});
+it('handles a purge committed after polling and before a save without creating a pending resurrection', async () => {
+  const board = await newBoard(scope, 'Old open snapshot', null), server = cloud();
+  server.rpc.mockImplementationOnce(async () => {
+    server.rows.note_boards.set(board.id, { ...remoteBoard(board, ''), revision: 2, purged: true, deleted: true, elements: [], app_state: {}, asset_ids: [] });
+    return { data: null, error: { message: 'NOTE_PURGED' } };
+  });
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true, pending: 0, conflicts: 0 });
+  expect(await db.boards.get(board.key)).toMatchObject({ purged: true, name: '', elements: [], dirty: false, remoteRevision: 2 });
+  expect(await db.boards.count()).toBe(1);
+});
+it('does not let a delayed save acknowledgement rewind a newer revision stored by another tab', async () => {
+  const board = await newBoard(scope, 'Initial tab', null), server = cloud();
+  const original = server.rpc.getMockImplementation()!;
+  server.rpc.mockImplementationOnce(async (name, args) => {
+    const saved = await original(name, args);
+    await db.boards.update(board.key, { name: 'Newer acknowledged tab edit', dirty: false, remoteRevision: 3 });
+    return saved;
+  });
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  expect(await db.boards.get(board.key)).toMatchObject({ name: 'Newer acknowledged tab edit', dirty: false, remoteRevision: 3 });
+});
+it('requires a new version review if the conflict changed while the user choice was waiting', async () => {
+  const board = await newBoard(scope, 'Local version', null), server = cloud();
+  server.rows.note_boards.set(board.id, remoteBoard(board, 'First cloud version'));
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  server.rows.note_boards.set(board.id, { ...remoteBoard(board, 'New cloud version'), revision: 2 });
+  await syncWorkspace(server.client, scope, settings, vi.fn());
+  await expect(resolveSyncConflict(scope, board.key, 'local', 1)).rejects.toThrow('cloud version changed');
+  expect(await db.boards.get(board.key)).toMatchObject({ name: 'Local version', dirty: true, remoteRevision: 0, syncConflict: { revision: 2 } });
+  expect(server.rows.note_boards.get(board.id).name).toBe('New cloud version');
+  await resolveSyncConflict(scope, board.key, 'local', 2);
+  expect(await syncWorkspace(server.client, scope, settings, vi.fn())).toMatchObject({ complete: true });
 });

@@ -6,6 +6,9 @@ export interface RecordBase {
   key: string; id: string; scope: string; name: string;
   createdAt?: string; createdAtEstimated?: boolean;
   updatedAt: string; deleted: boolean; dirty: boolean; remoteRevision: number; syncError?: string;
+  purged?: boolean;
+  syncBase?: { revision: number; data: Record<string, unknown> };
+  syncConflict?: { revision: number; data: Record<string, unknown> };
 }
 export interface Folder extends RecordBase { parentId: string | null; color: string }
 export interface Board extends RecordBase {

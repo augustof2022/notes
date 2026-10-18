@@ -1,6 +1,6 @@
 import type { Asset, Board, Folder } from '../types';
 
-export interface PendingSyncItem { key: string; kind: 'board' | 'folder' | 'image'; name: string; reason: string; failed: boolean }
+export interface PendingSyncItem { key: string; kind: 'board' | 'folder' | 'image'; name: string; reason: string; failed: boolean; conflict?: boolean }
 export function syncErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
@@ -8,7 +8,7 @@ export function syncErrorMessage(error: unknown) {
 }
 export function pendingImageMessage(count: number, errors: string[], conflicts = 0) {
   const reason = errors.find(x => /reconnect.*drive|drive.*reconnect/i.test(x)) || errors[0] || 'Retry uploads now. Open Note on the device where these images were added if their files are missing here.';
-  return `${count} image${count === 1 ? '' : 's'} pending · ${reason}${conflicts ? ` · ${conflicts} conflict ${conflicts === 1 ? 'copy' : 'copies'} also need${conflicts === 1 ? 's' : ''} syncing` : ''}`;
+  return `${count} image${count === 1 ? '' : 's'} pending · ${reason}${conflicts ? ` · ${conflicts} sync conflict${conflicts === 1 ? '' : 's'} need${conflicts === 1 ? 's' : ''} review` : ''}`;
 }
 export function imageReady(asset: Asset | undefined) {
   // File upload and searchable-text metadata are separate. A board can use the
@@ -19,11 +19,11 @@ export function pendingSyncItems(boards: Board[], folders: Folder[], assets: Ass
   const images = new Map(assets.map(asset => [asset.id, asset]));
   const pending: PendingSyncItem[] = [];
   for (const record of [...folders, ...boards]) {
-    if (!record.dirty) continue;
+    if (!record.dirty || record.purged) continue;
     const board = 'elements' in record;
     const waiting = board && !record.deleted ? record.assetIds.filter(id => !imageReady(images.get(id))).length : 0;
     pending.push({ key: record.key, kind: board ? 'board' : 'folder', name: record.name,
-      failed: !!record.syncError,
+      failed: !!record.syncError || !!record.syncConflict, conflict: !!record.syncConflict,
       reason: record.syncError || (waiting ? `Waiting for ${waiting} image${waiting === 1 ? '' : 's'} to upload and register in the cloud.` : record.deleted ? 'Waiting to sync its move to Trash.' : 'Saved on this device; waiting to upload changes.') });
   }
   for (const asset of assets.filter(asset => asset.dirty)) {

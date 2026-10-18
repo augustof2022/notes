@@ -45,6 +45,6 @@ it('explains missing image bytes instead of silently reporting success', async (
   expect(upload).not.toHaveBeenCalled(); expect(cloud.rpc).not.toHaveBeenCalled();
 });
 it('prioritizes reconnection instructions while retaining pending counts and conflict information', () => {
-  expect(pendingImageMessage(2, ['Network failure', 'Reconnect Google Drive'], 1)).toBe('2 images pending · Reconnect Google Drive · 1 conflict copy also needs syncing');
+  expect(pendingImageMessage(2, ['Network failure', 'Reconnect Google Drive'], 1)).toBe('2 images pending · Reconnect Google Drive · 1 sync conflict needs review');
   expect(syncErrorMessage({ message: 'Permission denied' })).toBe('Permission denied');
 });

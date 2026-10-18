@@ -3,7 +3,7 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { db, newBoard, newFolder, touch } from './db';
-import { importLocalWorkspace, preserveConflict, syncWorkspace } from './sync';
+import { importLocalWorkspace, syncWorkspace } from './sync';
 
 vi.mock('./drive', () => ({ uploadDriveImage: vi.fn(), downloadDriveImage: vi.fn() }));
 const createdAt = '2026-09-10T04:00:00.000Z';
@@ -71,7 +71,7 @@ it('marks dates from the deployed v2 migration as estimates without changing the
   db.close(); await db.open();
   expect(await db.boards.get('local:v2')).toMatchObject({ createdAt, createdAtEstimated: true });
 });
-it('keeps original creation dates on account import and uses a new date for conflict copies', async () => {
+it('keeps original creation dates on account import', async () => {
   const folder = await newFolder('local', 'Folder', null);
   const board = await newBoard('local', 'Board', folder.id);
   await db.folders.update(folder.key, { createdAt, updatedAt: editedAt });
@@ -79,10 +79,7 @@ it('keeps original creation dates on account import and uses a new date for conf
   await importLocalWorkspace('owner');
   expect((await db.folders.where('scope').equals('owner').first())?.createdAt).toBe(createdAt);
   expect((await db.boards.where('scope').equals('owner').first())?.createdAt).toBe(createdAt);
-  const copy = preserveConflict({ ...board, createdAt });
-  expect(copy.createdAt).toBe(copy.updatedAt);
-  expect(copy.createdAt).not.toBe(createdAt);
-  expect(copy.createdAtEstimated).toBe(false);
+
 });
 it('sends creation metadata and retains known dates through old-server saves and downloads', async () => {
   const folder = await newFolder('owner', 'Folder', null);

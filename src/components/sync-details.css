@@ -13,3 +13,13 @@
 .save-status span{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .save-status.sync-attention{color:#b45309}
 .sync-account,.sync-detail{overflow-wrap:anywhere}
+
+.sync-conflict-review{font-size:11px;line-height:1.7;padding:10px 0}
+.sync-conflict-review summary{color:var(--accent);cursor:pointer;margin:7px 0}
+.sync-conflict-versions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0}
+.sync-conflict-versions article{min-width:0;border:1px solid var(--line);border-radius:7px;padding:8px;overflow-wrap:anywhere}
+.sync-conflict-versions h4{font-size:11px;margin:0}
+.sync-conflict-versions small{font-size:10px;color:var(--muted)}
+.sync-conflict-preview{position:relative;height:100px;overflow:hidden;border:1px solid var(--line);background:var(--bg);border-radius:5px;margin:6px 0}
+.sync-conflict-preview .scene-thumbnail{position:static;width:100%;height:100%}
+.sync-conflict-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}

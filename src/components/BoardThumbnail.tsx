@@ -1,0 +1,10 @@
+import type { Board } from '../types';
+
+export function BoardThumbnail({ board }: { board: Pick<Board, 'elements'> }) {
+  const elements = board.elements.filter(x => !x.isDeleted);
+  if (!elements.length) return <div className="thumbnail-empty"><span className="paper-note"><span /><span /><span /></span><span className="paper-dot" /><span className="paper-dash" /></div>;
+  const minX = Math.min(...elements.map(x => x.x)), minY = Math.min(...elements.map(x => x.y));
+  const width = Math.max(300, ...elements.map(x => x.x + Math.abs(x.width) - minX));
+  const height = Math.max(180, ...elements.map(x => x.y + Math.abs(x.height) - minY));
+  return <svg className="scene-thumbnail" viewBox={`${minX - 20} ${minY - 20} ${width + 40} ${height + 40}`} aria-hidden="true">{elements.slice(0, 150).map(element => element.type === 'text' ? <text key={element.id} x={element.x} y={element.y + element.fontSize} fontSize={element.fontSize} fill={element.strokeColor}>{element.text.split('\n').slice(0, 6).map((line, index) => <tspan key={index} x={element.x} dy={index ? element.fontSize * 1.3 : 0}>{line}</tspan>)}</text> : element.type === 'image' ? <g key={element.id}><rect x={element.x} y={element.y} width={element.width} height={element.height} rx="8" fill="#e7e1f5" /><text x={element.x + 10} y={element.y + 24} fontSize="14" fill="#8b77bf">Screenshot</text></g> : element.type === 'ellipse' ? <ellipse key={element.id} cx={element.x + element.width / 2} cy={element.y + element.height / 2} rx={Math.abs(element.width / 2)} ry={Math.abs(element.height / 2)} stroke={element.strokeColor} fill={element.backgroundColor || 'none'} strokeWidth={2} /> : element.type === 'rectangle' || element.type === 'frame' ? <rect key={element.id} x={element.x} y={element.y} width={Math.abs(element.width)} height={Math.abs(element.height)} rx={8} stroke={element.strokeColor} fill={element.backgroundColor || 'none'} strokeWidth={2} /> : 'points' in element ? <polyline key={element.id} points={element.points.map(point => `${element.x + point[0]},${element.y + point[1]}`).join(' ')} stroke={element.strokeColor} fill="none" strokeWidth={element.strokeWidth} /> : null)}</svg>;
+}
