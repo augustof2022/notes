@@ -19,10 +19,21 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.6.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.7.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.6.0</span></h2><span class="release-status">Latest</span></div>
-        <p class="updated"><time datetime="2026-10-18">October 18, 2026</time></p>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.7.0</span></h2><span class="release-status">Latest</span></div>
+        <p class="updated"><time datetime="2026-10-23">October 23, 2026</time></p>
+        <h3>Keep Drive connected for uploading and viewing images</h3>
+        <ul>
+          <li><strong>Remember valid access.</strong> Reopening Note reuses a short-lived, account-verified Drive connection with its original expiry. Refreshing your Note login does not disconnect Google.</li>
+          <li><strong>Renew in the background.</strong> With the one-time private Drive renewal setup complete, Note renews Google access for both uploads and image loading. Concurrent requests share one renewal and retry once if Google rejects an expired token.</li>
+          <li><strong>Reconnect only when needed.</strong> Temporary network errors, request limits, and full Drive storage have their own explanations. Revoked or expired Google consent still requires reconnecting. Missing renewal setup is shown separately.</li>
+          <li><strong>Publish ready boards sooner.</strong> Upload two images at a time and publish each board as soon as its own image files and cloud locations are ready, while unrelated images continue uploading.</li>
+          <li><strong>One-time owner setup.</strong> Deploy the private Supabase function and credential-table migration, then enable saved Drive access once in Images &amp; search. Google secrets and refresh credentials stay out of the frontend and GitHub. See the <a href="./setup.html#drive-renewal">setup guide</a>.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.6.0</strong><span>One board across devices, with a complete Trash</span></summary>        <p class="release-date"><time datetime="2026-10-18">October 18, 2026</time></p>
         <h3>One board across devices, with a complete Trash</h3>
         <ul>
           <li><strong>Viewing stays local.</strong> Panning, zooming, brush preferences, and image-loading details no longer count as competing board edits. Opening a folder or board on another device does not create a copy.</li>
@@ -30,8 +41,7 @@
           <li><strong>Delete permanently or empty Trash.</strong> Review and confirm the items to remove. Synced deletion erases their saved content and retains an inert marker so an older offline device cannot restore the same ID. Shared image files stay in storage.</li>
           <li><strong>Update every device.</strong> Load this version on both devices to stop older builds from creating conflict copies. The copy fix works with the existing cloud schema. Permanent Trash deletion needs the one-time permanent-trash SQL update in Supabase.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.5.3</strong><span>See images load across devices</span></summary><p class="release-date"><time datetime="2026-10-18">October 18, 2026</time></p>
         <h3>See images load across devices</h3>
         <ul>

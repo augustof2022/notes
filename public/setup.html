@@ -9,7 +9,7 @@
 </head>
 <body>
 <header><a href="./">← Back to Note</a><h1>Google login. Your own Drive.</h1><p>A step-by-step guide for the app owner. Complete this once; each person can then sign in with their Google account.</p></header>
-<div class="callout"><strong>Your Note setup is working.</strong> Google sign-in, board sync to Supabase, and a private image upload to your Google Drive were verified. Open Note with the same Google account on your other devices. The steps below document the setup for future reference.</div>
+<div class="callout"><strong>Initial sign-in and sync were previously verified.</strong> Google sign-in, board sync to Supabase, and a private image upload to your Google Drive were verified. Open Note with the same Google account on your other devices. The steps below document the setup for future reference.</div>
 <table aria-label="Setup checklist"><thead><tr><th>Setup</th><th>Status</th></tr></thead><tbody>
 <tr><td>GitHub Pages website</td><td class="done">Complete</td></tr>
 <tr><td>Supabase folders, boards, image metadata and ownership rules</td><td class="done">Complete</td></tr>
@@ -101,7 +101,14 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <h2>Costs, access and reconnecting</h2>
 <p>Standard Drive API use is currently available at no additional cost within Google's quotas; your Drive storage allowance applies. This setup uses OAuth and Drive API. It does not need Cloud Run, a service account, an API key or a paid OCR service. <a href="https://developers.google.com/workspace/drive/api/guides/limits" target="_blank" rel="noreferrer">Current Drive limits and pricing</a>.</p>
 <p>Testing gets your own account working. For users outside the test-user list, review <strong>Audience → Publish app</strong> and any branding or verification requirements Google shows. Public GitHub code does not publish your boards or share Drive files.</p>
-<p>Drive access may need reconnecting after reloading Note or after about 50 minutes. Use <strong>Settings &amp; storage → Images &amp; search → Continue with Google / Reconnect Google Drive</strong>. Local images remain saved while uploads wait. Export a backup before clearing browser data.</p>
+<h2 id="drive-renewal">Keep Drive connected for uploads and image loading</h2>
+<p>Note remembers a verified short-lived Drive connection across reloads. For automatic renewal after Google expires that access, the app owner must also deploy the private <code>drive-session</code> Supabase Edge Function. This is separate from the initial Google sign-in setup and GitHub Pages deployment.</p>
+<ol>
+<li>Run <a href="./enable-drive-refresh.sql">enable-drive-refresh.sql</a> in your Supabase SQL Editor.</li>
+<li>Follow the <a href="https://github.com/augustof2022/notes/blob/main/supabase/functions/drive-session/README.md" target="_blank" rel="noreferrer">private Drive renewal deployment guide</a> to set the four server-only secrets and deploy the function. Keep the Google secret and encryption key in Supabase Edge Function Secrets.</li>
+<li>In Note, open <strong>Settings &amp; storage → Images &amp; search → Enable saved Drive access</strong> and complete Google consent once. Reopen a board on another device to test an uncached image.</li>
+</ol>
+<p>Uploads and image retrieval then share renewal and retry an expired-token request once. Temporary network errors and request limits retry without asking for a new Google consent. Revoked permissions or Google's Testing-mode grant expiry can still require reconnecting. Without the renewal function, valid cached access works until Google expires it. Local images remain saved while uploads wait; previously downloaded images stay cached for offline viewing.</p>
 <details><summary>Using a different Supabase project</summary><p>The current project is already configured. For a replacement, run the SQL below, configure its URL and publishable key when building the app, set its auth URLs, and use its own Google callback. Never use a secret or service-role key in the browser.</p><button id="copy-sql">Copy SQL setup</button><span class="status" id="sql-status" role="status"></span><pre id="sql">Loading setup…</pre></details>
 <script>
 document.querySelectorAll('[data-copy]').forEach(button => {button.addEventListener('click',async()=>{const output=button.nextElementSibling;try{await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());output.textContent='Copied';}catch{output.textContent='Select the value above and copy it.';}});});

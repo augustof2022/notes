@@ -13,7 +13,8 @@ import { pendingSyncItems, pendingSyncLabel } from './lib/sync-status';
 import { SyncDetails } from './components/SyncDetails';
 import { BoardImageNotice } from './components/BoardImageNotice';
 import { imageLoadLabel, type BoardImageState } from './lib/board-images';
-import { disconnectDrive, driveConnected, googleSignInUrl, useGoogleDriveSession } from './lib/drive';
+import { disconnectDrive, ensureDriveAccess, getDriveStatus, googleSignInUrl, onDriveStatus, useGoogleDriveSession } from './lib/drive';
+import type { DriveStatus } from './lib/drive-auth';
 import { needsImageOcr, onOcrStatus, queueOcr } from './lib/ocr';
 import { searchBoards } from './lib/search';
 import { BoardCanvas, type CanvasHandle } from './components/BoardCanvas';
@@ -48,6 +49,8 @@ export default function App() {
   const [authError, setAuthError] = useState(oauthReturn?.message || '');
   const [settings, setSettings] = useState<Settings>(getSettings);
   const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [driveStatus, setDriveStatus] = useState(getDriveStatus);
   const scope = session?.user.id || 'local';
   const [workspace, setWorkspace] = useState<{ folders: Folder[]; boards: Board[] }>({ folders: [], boards: [] });
   const [librarySorts, setLibrarySorts] = useState(readLibrarySorts);
@@ -109,21 +112,41 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', event);
   }, []);
   useEffect(() => {
-    if (!client) { setSession(null); return; }
-    let alive = true;
-    void client.auth.getSession().then(({ data, error }) => { if (alive) { if (error) message(messageOf(error)); setSession(data.session); } });
-    const { data } = client.auth.onAuthStateChange((_event, session) => { if (alive) setSession(session); });
+    if (!client) { setSession(null); setAuthReady(true); return; }
+    let alive = true, observedAuth = false;
+    void client.auth.getSession().then(({ data, error }) => {
+      if (!alive || observedAuth) return;
+      if (error) { message(messageOf(error)); return; }
+      setSession(data.session); setAuthReady(true);
+    }).catch(error => { if (alive) message(messageOf(error)); });
+    const { data } = client.auth.onAuthStateChange((_event, session) => {
+      if (!alive) return;
+      observedAuth = true; setSession(session); setAuthReady(true);
+    });
     return () => { alive = false; data.subscription.unsubscribe(); };
   }, [client]);
   useEffect(() => {
-    let alive = true;
-    void useGoogleDriveSession(session).then(connected => {
-      if (!alive || !connected) return;
-      setDriveRevision(previous => previous + 1);
+    let previous = getDriveStatus();
+    setDriveStatus(previous);
+    return onDriveStatus(next => {
+      setDriveStatus(next);
+      const becameConnected = next.phase === 'connected' && next.owner === activeScope.current
+        && (previous.phase !== 'connected' || previous.owner !== next.owner);
+      previous = next;
+      if (!becameConnected) return;
+      setDriveRevision(revision => revision + 1);
       void canvasRef.current?.reloadImages().catch(error => message(messageOf(error)));
-    }).catch(error => { if (alive) message(messageOf(error)); });
-    return () => { alive = false; };
-  }, [session?.user.id, session?.provider_token]);
+    });
+  }, [message]);
+  useEffect(() => {
+    // The initial null value means the Note login has not loaded yet. It must
+    // not clear the scoped Drive lease before getSession resolves.
+    if (!authReady) return;
+    void useGoogleDriveSession(session, client).catch(() => {
+      // Drive status distinguishes consent, app setup, and temporary failures;
+      // image and upload panels surface the appropriate recovery action.
+    });
+  }, [authReady, client, session?.user.id, session?.provider_token, session?.provider_refresh_token]);
   useEffect(() => {
     setFolderId(null); setBoardId(null); setWorkspace({ folders: [], boards: [] }); setAssets([]); setView('library');
     setSyncStatus(scope === 'local' ? 'Saved on this device' : 'Ready to sync');
@@ -136,7 +159,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, [scope]);
   const sync = useCallback(async (manual = true) => {
-    if (!client || scope === 'local' || activeScope.current !== scope) return;
+    if (!authReady || !client || scope === 'local' || activeScope.current !== scope) return;
     const promise = syncRunner.current.request(async () => {
       if (activeScope.current !== scope) return;
       setSyncing(true);
@@ -172,16 +195,19 @@ export default function App() {
     syncPromise.current = promise;
     await promise;
     if (syncPromise.current === promise) syncPromise.current = null;
-  }, [client, scope, settings, message]);
+  }, [authReady, client, scope, settings, message]);
   useEffect(() => {
     void sync();
     const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void sync(false); }, SYNC_POLL_MS);
     let lastWake = 0;
+    const refreshDrive = () => {
+      if (authReady && scope !== 'local') void ensureDriveAccess(scope).catch(() => {});
+    };
     const wake = () => {
       if (document.visibilityState === 'hidden' || Date.now() - lastWake < 1000) return;
-      lastWake = Date.now(); void sync(false);
+      lastWake = Date.now(); refreshDrive(); void sync(false);
     };
-    const online = () => { void sync(); };
+    const online = () => { refreshDrive(); void sync(); };
     const offline = () => setSyncStatus('Offline · changes are saved on this device');
     const visibility = () => {
       if (document.visibilityState === 'hidden') { void canvasRef.current?.flush().then(() => sync(false)).catch(error => message(messageOf(error))); }
@@ -191,7 +217,7 @@ export default function App() {
     window.addEventListener('focus', wake); window.addEventListener('pageshow', wake);
     document.addEventListener('visibilitychange', visibility);
     return () => { clearInterval(timer); window.removeEventListener('online', online); window.removeEventListener('offline', offline); window.removeEventListener('focus', wake); window.removeEventListener('pageshow', wake); document.removeEventListener('visibilitychange', visibility); clearTimeout(idleSyncTimer.current); };
-  }, [sync, driveRevision]);
+  }, [authReady, scope, sync, driveRevision]);
   useEffect(() => {
     if (scope === 'local') return;
     const versions = new Map<string, string>();
@@ -218,7 +244,7 @@ export default function App() {
     if (!(await providerResponse.json()).external?.google) throw new Error('Google sign-in is not set up yet. The app owner needs to enable Google in Supabase.');
     const url = await googleSignInUrl(client, new URL(import.meta.env.BASE_URL, location.href).href, session?.user.email);
     const next = { ...settings, imageStore: 'drive' as const };
-    setSettings(next); storeSettings(next); disconnectDrive();
+    setSettings(next); storeSettings(next);
     location.assign(url);
   }
   async function navigateFolder(id: string | null) {
@@ -428,7 +454,7 @@ export default function App() {
     {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Stamp last icon', 'I'], ['Stop stamping', 'Esc'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
     {deleteTrash && <DeleteTrashDialog selection={deleteTrash.selection} empty={deleteTrash.empty} cloud={deleteTrash.scope !== 'local'} onClose={() => setDeleteTrash(null)} onDelete={confirmTrashDelete} />}
     {syncDetails && session && <SyncDetails account={session.user.email || session.user.id} status={syncStatus} pending={pendingSync} syncing={syncing} lastChecked={lastChecked} lastSynced={lastSynced} conflicts={[...workspace.boards, ...workspace.folders, ...trash].filter(record => !!record.syncConflict)} onResolveConflict={chooseSyncVersion} images={currentImages} onRetryImages={() => void canvasRef.current?.reloadImages()} onSync={sync} onClose={() => setSyncDetails(false)} />}
-    {dialog?.kind === 'settings' && <SettingsDialog cloudConfigured={!!client} settings={settings} session={session} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
+    {dialog?.kind === 'settings' && <SettingsDialog cloudConfigured={!!client} settings={settings} session={session} driveStatus={driveStatus} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
     {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} initialError={authError} onGoogle={signInWithGoogle} onClose={() => { setDialog(null); setAuthError(''); }} onComplete={() => { setDialog(null); setAuthError(''); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
   </div>;
 }
@@ -472,13 +498,17 @@ function AuthDialog({ configured, client, initialError, onGoogle, onClose, onCom
     </>}
   </Modal>;
 }
-function SettingsDialog({ cloudConfigured, settings, session, syncStatus, assets, syncing, onSyncNow, onSyncDetails, onClose, onSave, onSignIn, onSignOut, onConnectDrive, onExport, onImport, onImportLocal, onRetryOcr }: { cloudConfigured: boolean; settings: Settings; session: Session | null; syncStatus: string; assets: Asset[]; syncing: boolean; onSyncNow: () => Promise<void>; onSyncDetails: () => void; onClose: () => void; onSave: (settings: Settings) => Promise<void>; onSignIn: () => void; onSignOut: () => Promise<void>; onConnectDrive: () => Promise<void>; onExport: () => Promise<void>; onImport: (file: File) => Promise<void>; onImportLocal: () => Promise<void>; onRetryOcr: () => Promise<void> }) {
+function SettingsDialog({ cloudConfigured, settings, session, driveStatus, syncStatus, assets, syncing, onSyncNow, onSyncDetails, onClose, onSave, onSignIn, onSignOut, onConnectDrive, onExport, onImport, onImportLocal, onRetryOcr }: { cloudConfigured: boolean; settings: Settings; session: Session | null; driveStatus: DriveStatus; syncStatus: string; assets: Asset[]; syncing: boolean; onSyncNow: () => Promise<void>; onSyncDetails: () => void; onClose: () => void; onSave: (settings: Settings) => Promise<void>; onSignIn: () => void; onSignOut: () => Promise<void>; onConnectDrive: () => Promise<void>; onExport: () => Promise<void>; onImport: (file: File) => Promise<void>; onImportLocal: () => Promise<void>; onRetryOcr: () => Promise<void> }) {
   const [draft, setDraft] = useState(settings); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const [tab, setTab] = useState<'cloud' | 'storage' | 'preferences'>('cloud');
   const fileRef = useRef<HTMLInputElement>(null);
+  const currentDrive = driveStatus.owner === session?.user.id ? driveStatus : undefined;
+  const needsDriveConsent = !session || !currentDrive || currentDrive.phase === 'disconnected' || currentDrive.phase === 'reconnect';
+  const canEnableSavedAccess = currentDrive?.phase === 'connected' && !currentDrive.renewable;
+  const temporarySetup = currentDrive?.phase === 'temporary' && currentDrive.setupNeeded;
   function action(work: () => Promise<void>) { setError(''); setBusy(true); void work().catch(error => setError(messageOf(error))).finally(() => setBusy(false)); }
   return <Modal title="Make Note yours" wide onClose={onClose}><p className="settings-version">Note v{APP_VERSION} · <a href="./updates.html" target="_blank" rel="noreferrer">Version updates</a></p><div className="settings-tabs">{(['cloud', 'storage', 'preferences'] as const).map(value => <button key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value === 'cloud' ? 'Cloud sync' : value === 'storage' ? 'Images & search' : 'Preferences & backup'}</button>)}</div><form onSubmit={event => { event.preventDefault(); action(async () => { await onSave(draft); setNotice('Settings saved.'); }); }}>
     {tab === 'cloud' && <><p className="dialog-description">{cloudConfigured ? 'Sign in to sync your folders, boards, and images across devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p><div className="settings-account"><span><Cloud size={18} /><strong>{session?.user.email || 'Not signed in'}</strong></span><button type="button" className="secondary-button" disabled={busy || !cloudConfigured} onClick={() => session ? action(onSignOut) : onSignIn()}>{session ? 'Sign out' : 'Sign in'}</button></div><p className="small-note sync-detail">{syncStatus}</p>{session && <div className="board-chrome-presets"><button type="button" className="secondary-button" disabled={syncing || busy} onClick={() => action(onSyncNow)}>{syncing ? 'Syncing…' : 'Sync now'}</button><button type="button" className="secondary-button" onClick={onSyncDetails}>View sync details</button></div>}{session && <button className="secondary-button" type="button" disabled={busy} onClick={() => action(onImportLocal)}>Copy this device’s boards into my account</button>}</>}
-    {tab === 'storage' && <><p className="dialog-description">Paste an image onto a board. Note saves it in the background.</p><label>Store new images in<select value={draft.imageStore} onChange={event => setDraft({ ...draft, imageStore: event.target.value as Settings['imageStore'] })}><option value="supabase">Supabase Storage</option><option value="drive">My Google Drive — private “Note images” folder</option></select></label><p className="small-note">Google sign-in automatically selects Drive for new images. Existing images stay in their original storage. Open a board to retrieve its images; any missing files show loading details and Retry images above the canvas.</p><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onConnectDrive)}>{session ? 'Reconnect Google Drive' : 'Connect Google Drive'} <ArrowUpRight size={15} /></button><p className="small-note">{driveConnected(session?.user.id) ? `Drive connected for ${session?.user.email || 'your Google account'}.` : 'Drive is not connected in this session. Reconnect with the same Google account to load saved images or upload waiting files.'}</p><div className="upload-status"><strong>{assets.filter(x => x.dirty).length} image{assets.filter(x => x.dirty).length === 1 ? '' : 's'} waiting to sync</strong><p role="status">{syncStatus}</p>{assets.filter(x => x.dirty && x.syncError).slice(0, 3).map(asset => <p key={asset.key} className="upload-error">{asset.syncError}</p>)}<button type="button" className="secondary-button" disabled={busy || syncing || !session} onClick={() => action(async () => { await onSyncNow(); setNotice('Sync attempt finished. Check the upload status above.'); })}>{syncing ? 'Uploading…' : 'Retry uploads now'}</button><p className="small-note">Keep Note open on the device where you added the images until syncing finishes. If Drive needs access, use Reconnect Google Drive above.</p></div><label className="toggle-row"><span><strong>Search words in images</strong><small>Free English OCR runs on your device.</small></span><input type="checkbox" checked={draft.ocrEnabled} onChange={event => setDraft({ ...draft, ocrEnabled: event.target.checked })} /></label><button type="button" className="text-button" disabled={busy} onClick={() => action(onRetryOcr)}>Retry unread images</button></>}
+    {tab === 'storage' && <><p className="dialog-description">Paste an image onto a board. Note saves it in the background.</p><label>Store new images in<select value={draft.imageStore} onChange={event => setDraft({ ...draft, imageStore: event.target.value as Settings['imageStore'] })}><option value="supabase">Supabase Storage</option><option value="drive">My Google Drive — private “Note images” folder</option></select></label><p className="small-note">Google sign-in automatically selects Drive for new images. Existing images stay in their original storage. Open a board to retrieve its images; any missing files show loading details and Retry images above the canvas.</p>{(needsDriveConsent || canEnableSavedAccess || temporarySetup) && <button type="button" className="secondary-button" disabled={busy} onClick={() => action(onConnectDrive)}>{canEnableSavedAccess ? 'Enable saved Drive access' : currentDrive?.phase === 'reconnect' || temporarySetup ? 'Reconnect Google Drive' : 'Connect Google Drive'} <ArrowUpRight size={15} /></button>}<p className="small-note" role="status">{currentDrive?.message || 'Connect Google Drive to load saved images and upload new files.'}</p>{currentDrive?.setupNeeded && <p className="small-note">The app owner can enable automatic renewal using the <a href="https://github.com/augustof2022/notes/blob/main/supabase/functions/drive-session/README.md" target="_blank" rel="noreferrer">Drive setup guide</a>.</p>}<div className="upload-status"><strong>{assets.filter(x => x.dirty).length} image{assets.filter(x => x.dirty).length === 1 ? '' : 's'} waiting to sync</strong><p role="status">{syncStatus}</p>{assets.filter(x => x.dirty && x.syncError).slice(0, 3).map(asset => <p key={asset.key} className="upload-error">{asset.syncError}</p>)}<button type="button" className="secondary-button" disabled={busy || syncing || !session} onClick={() => action(async () => { await onSyncNow(); setNotice('Sync attempt finished. Check the upload status above.'); })}>{syncing ? 'Uploading…' : 'Retry uploads now'}</button><p className="small-note">Keep Note open on the device where you added the images until syncing finishes. The Drive status above explains any action needed.</p></div><label className="toggle-row"><span><strong>Search words in images</strong><small>Free English OCR runs on your device.</small></span><input type="checkbox" checked={draft.ocrEnabled} onChange={event => setDraft({ ...draft, ocrEnabled: event.target.checked })} /></label><button type="button" className="text-button" disabled={busy} onClick={() => action(onRetryOcr)}>Retry unread images</button></>}
     {tab === 'preferences' && <><label>Appearance<select value={draft.theme} onChange={event => setDraft({ ...draft, theme: event.target.value as Settings['theme'] })}><option value="light">Light — a quiet place to think</option><option value="dark">Dark — for late-night ideas</option></select></label><div className="backup-block"><h3>Keep a copy of your ideas</h3><p>Export your workspace, including images and screenshot text, as a portable backup. Importing creates new boards.</p><div><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onExport)}><ArrowDownToLine size={16} /> Export backup</button><button type="button" className="secondary-button" disabled={busy} onClick={() => fileRef.current?.click()}>Import backup</button></div><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={event => { const file = event.target.files?.[0]; if (file) action(() => onImport(file)); event.target.value = ''; }} /></div><p className="small-note">Local boards belong to this browser. Export a backup before clearing browser data.</p></>}
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Done</button><button className="primary-button" disabled={busy}>{busy ? 'Please wait…' : 'Save settings'}</button></div></form></Modal>;
 }

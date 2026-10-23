@@ -1,0 +1,6 @@
+project_id = "note"
+
+# Platform JWT verification supplements the handler's mandatory getUser check.
+# apikey alone, anon JWTs, and service-role JWTs cannot act as a Note user.
+[functions.drive-session]
+verify_jwt = true

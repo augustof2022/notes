@@ -202,10 +202,38 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
     else await saveRecord(board);
   }
   const dirtyAssets = await db.assets.where('scope').equals(scope).filter(x => x.dirty).toArray();
-  for (let index = 0; index < dirtyAssets.length; index++) {
+  const waitingKeys = new Set(waitingBoards.map(board => board.key));
+  let completedImages = 0, nextImage = 0;
+  let stopped: unknown;
+  let boardDrain = Promise.resolve();
+  async function drainWaitingBoards(finished: boolean) {
     assertCurrent();
-    const asset = dirtyAssets[index];
-    report(`Syncing image ${index + 1} of ${dirtyAssets.length}…`);
+    for (const key of waitingKeys) {
+      // Scene and image dependencies may change while files are uploading.
+      const current = await db.boards.get(key);
+      if (!current?.dirty || current.purged) { waitingKeys.delete(key); continue; }
+      const images = current.deleted ? [] : await db.assets.bulkGet(current.assetIds.map(id => recordKey(scope, id)));
+      if (images.some(asset => !imageReady(asset))) {
+        if (finished) {
+          const reason = images.some(asset => !asset) ? 'Image file is missing here. Open Note on the device where you added it, then retry uploads.'
+            : images.find(asset => asset?.syncError)?.syncError || 'Waiting for image files and their cloud metadata. Text recognition does not need to finish first.';
+          await db.boards.update(current.key, { syncError: reason });
+        }
+      } else {
+        // Only this serialized drain removes a board, so two completed images
+        // cannot launch competing saves of the same revision.
+        waitingKeys.delete(key);
+        await saveRecord(current);
+      }
+    }
+  }
+  function queueBoardDrain(finished = false) {
+    boardDrain = boardDrain.then(async () => {
+      if (stopped) return;
+      try { await drainWaitingBoards(finished); } catch (error) { stopped = error; }
+    });
+  }
+  async function syncImage(asset: Asset) {
     try {
       let storage = asset.storage, remotePath = asset.remotePath;
       if (!remotePath) {
@@ -228,6 +256,9 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
         const current = await db.assets.get(asset.key);
         if (current) await db.assets.update(asset.key, { metadataSaved: true, syncError: undefined, dirty: current.ocrText !== asset.ocrText || current.ocrStatus !== asset.ocrStatus });
       });
+      queueBoardDrain();
+      completedImages++;
+      report(`Syncing images · ${completedImages} of ${dirtyAssets.length} synced…`);
     } catch (error) {
       if (error instanceof SyncCancelled) throw error;
       assertCurrent();
@@ -236,17 +267,20 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
       errors.push(`Image: ${reason}`);
     }
   }
-  for (const board of waitingBoards) {
-    // Use the latest scene if the person kept editing during image uploads.
-    const current = await db.boards.get(board.key);
-    if (!current?.dirty) continue;
-    const images = current.deleted ? [] : await db.assets.bulkGet(current.assetIds.map(id => recordKey(scope, id)));
-    if (images.some(asset => !imageReady(asset))) {
-      const reason = images.some(asset => !asset) ? 'Image file is missing here. Open Note on the device where you added it, then retry uploads.'
-        : images.find(asset => asset?.syncError)?.syncError || 'Waiting for image files and their cloud metadata. Text recognition does not need to finish first.';
-      await db.boards.update(current.key, { syncError: reason });
-    } else await saveRecord(current);
+  if (dirtyAssets.length) report(`Syncing images · 0 of ${dirtyAssets.length} synced…`);
+  async function uploadWorker() {
+    while (!stopped && nextImage < dirtyAssets.length) {
+      const asset = dirtyAssets[nextImage++];
+      try { assertCurrent(); await syncImage(asset); }
+      catch (error) { stopped = error; }
+    }
   }
+  // Two requests overlap without keeping an entire pasted batch decoded in
+  // memory. Ready boards publish while unrelated image files are still moving.
+  await Promise.all(Array.from({ length: Math.min(2, dirtyAssets.length) }, () => uploadWorker()));
+  queueBoardDrain(true);
+  await boardDrain;
+  if (stopped) throw stopped;
   assertCurrent();
   const [latestBoards, latestFolders, latestAssets] = await Promise.all([db.boards.where('scope').equals(scope).toArray(), db.folders.where('scope').equals(scope).toArray(), db.assets.where('scope').equals(scope).toArray()]);
   const pending = pendingSyncItems(latestBoards, latestFolders, latestAssets);
