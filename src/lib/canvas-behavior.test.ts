@@ -34,6 +34,12 @@ describe('note canvas behavior', () => {
     expect(stickyTextTool({ ...text, locked: true }, 'text')).toBeNull();
     expect(stickyTextTool({ type: 'selection', customType: null, lastActiveTool: null, locked: true }, 'text')?.locked).toBe(false);
   });
+  it('preserves an explicitly locked custom stamp tool after leaving text mode', () => {
+    const stamp = { type: 'custom', customType: 'note-icon-stamp', lastActiveTool: null, locked: true } as AppState['activeTool'];
+    expect(stickyTextTool(stamp, 'text')).toBeNull();
+    expect({ ...stamp, ...stickyTextTool(stamp, 'text') }).toEqual(stamp);
+    expect(stickyTextTool({ ...stamp, locked: false }, 'text')).toBeNull();
+  });
 });
 describe('handwriting search', () => {
   it('indexes reviewed words in a descendant folder and rejects changed or deleted handwriting', () => {

@@ -9,7 +9,7 @@ export function Modal({ title, children, onClose, wide = false }: { title: strin
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); }
       if (event.key !== 'Tab') return;
-      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, textarea, a[href]') || []).filter(x => x.offsetParent !== null);
+      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, textarea, a[href], summary') || []).filter(x => x.offsetParent !== null);
       if (!items.length) return;
       const index = items.indexOf(document.activeElement as HTMLElement);
       if (event.shiftKey && index <= 0) { event.preventDefault(); items.at(-1)?.focus(); }

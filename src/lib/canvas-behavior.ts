@@ -16,6 +16,6 @@ export const DEFAULT_PEN_WIDTH = 1;
 export function penWidth(value: number) { return Number.isFinite(value) ? Math.round(Math.min(12, Math.max(0.5, value)) * 2) / 2 : DEFAULT_PEN_WIDTH; }
 export function stickyTextTool(tool: AppState['activeTool'], previousType: string) {
   if (tool.type === 'text' && !tool.locked) return { ...tool, locked: true };
-  if (previousType === 'text' && tool.type !== 'text' && tool.locked) return { ...tool, locked: false };
+  if (previousType === 'text' && tool.type !== 'text' && tool.type !== 'custom' && tool.locked) return { ...tool, locked: false };
   return null;
 }

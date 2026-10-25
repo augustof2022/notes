@@ -14,7 +14,8 @@ import { DrawingToolbar } from './DrawingToolbar';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
-import { IconStamps } from './IconStamps';
+import { StampTools } from './StampTools';
+import { WritingTools } from './WritingTools';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
@@ -224,7 +225,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
     {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
-      { id: 'stamps', title: 'Icon stamps' },
+      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' },
       { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
         setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
@@ -238,7 +239,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
-    {api && ready && <IconStamps api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <WritingTools api={api} root={canvasRoot} onMessage={onMessage} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;

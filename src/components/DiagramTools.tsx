@@ -246,6 +246,19 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   function cancelOperation() {
     setPlacing(false); setSourceId(null); setPointer(null); api.resetCursor();
   }
+  useEffect(() => {
+    const beginStamping = () => {
+      // Stamp activation and a canvas pointer-up may share the same event turn.
+      // Clear the live operation before React renders the canceled diagram UI.
+      live.current.panel = false;
+      live.current.placing = false;
+      live.current.sourceId = null;
+      cancelOperation();
+      closePanel();
+    };
+    root?.addEventListener('note-board-tool-activate', beginStamping);
+    return () => root?.removeEventListener('note-board-tool-activate', beginStamping);
+  }, [api, root]);
   function connectTo(target: ExcalidrawElement) {
     const elements = api.getSceneElementsIncludingDeleted(), source = elements.find(element => element.id === live.current.sourceId);
     const sourceData = source && readDiagramData(source), targetData = readDiagramData(target);
