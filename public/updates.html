@@ -19,10 +19,23 @@
       <span class="eyebrow">About Note</span>
       <h1>Version updates</h1>
       <p class="lead">What's new in your workspace, from small improvements to new ways to build your ideas.</p>
-      <p>The latest version is <strong><span data-app-version>0.7.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
+      <p>The latest version is <strong><span data-app-version>0.8.0</span></strong>. Check the version shown in your app to see which build you're using. If an update is ready, choose <strong>Save and update</strong> to load it.</p>
       <section class="release-card" aria-labelledby="release-current">
-        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.7.0</span></h2><span class="release-status">Latest</span></div>
-        <p class="updated"><time datetime="2026-10-23">October 23, 2026</time></p>
+        <div class="release-heading"><h2 id="release-current">Version <span data-app-version>0.8.0</span></h2><span class="release-status">Latest</span></div>
+        <p class="updated"><time datetime="2026-10-25">October 25, 2026</time></p>
+        <h3>Sign in once and return to your workspace</h3>
+        <ul>
+          <li><strong>Start with Google.</strong> Continue with Google signs you in or creates your Note account. The workspace opens after a valid Google-linked Note login is ready.</li>
+          <li><strong>Remember your login.</strong> Note restores its saved session and refreshes it in the background. A still-valid login can reopen cached boards offline; a new sign-in or an expired session needs internet.</li>
+          <li><strong>Keep Drive separate.</strong> Note login and saved Drive access renew separately. Temporary connection problems do not ask you to grant Google permission again. Revoked access or a genuine security sign-out can still require signing in or reconnecting.</li>
+          <li><strong>Preserve earlier device boards.</strong> Existing device-only notes stay on this browser. After signing in, use Settings &amp; storage → Cloud sync → Copy this device’s boards into my account when you want to import them. Nothing is copied automatically.</li>
+          <li><strong>Sign out safely.</strong> Signing out hides the workspace and clears the browser’s Drive access cache. It keeps existing local board data. About, updates, privacy, and terms remain public.</li>
+          <li><strong>Use the existing cloud setup.</strong> This release needs no new Supabase SQL migration. Saved Drive access continues to use the existing private renewal function.</li>
+        </ul>
+      </section>
+      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        <details><summary><strong>v0.7.0</strong><span>Keep Drive connected for uploading and viewing images</span></summary>
+        <p class="release-date"><time datetime="2026-10-23">October 23, 2026</time></p>
         <h3>Keep Drive connected for uploading and viewing images</h3>
         <ul>
           <li><strong>Remember valid access.</strong> Reopening Note reuses a short-lived, account-verified Drive connection with its original expiry. Refreshing your Note login does not disconnect Google.</li>
@@ -31,8 +44,7 @@
           <li><strong>Publish ready boards sooner.</strong> Upload two images at a time and publish each board as soon as its own image files and cloud locations are ready, while unrelated images continue uploading.</li>
           <li><strong>One-time owner setup.</strong> Deploy the private Supabase function and credential-table migration, then enable saved Drive access once in Images &amp; search. Google secrets and refresh credentials stay out of the frontend and GitHub. See the <a href="./setup.html#drive-renewal">setup guide</a>.</li>
         </ul>
-      </section>
-      <section class="version-updates" aria-labelledby="earlier-releases"><h2 id="earlier-releases">Earlier releases</h2>
+        </details>
         <details><summary><strong>v0.6.0</strong><span>One board across devices, with a complete Trash</span></summary>        <p class="release-date"><time datetime="2026-10-18">October 18, 2026</time></p>
         <h3>One board across devices, with a complete Trash</h3>
         <ul>

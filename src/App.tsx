@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
-import type { Session } from '@supabase/supabase-js';
+import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, CircleHelp, ChevronDown, ChevronRight, Cloud, CloudOff, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, TriangleAlert, X } from 'lucide-react';
 import type { Asset, Board, Folder, SearchMatch, Settings } from './types';
 import { recordKey } from './types';
-import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, seedLocal, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
+import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
 import { getSupabase } from './lib/supabase';
 import { appConfig } from './config';
 import { downloadAsset, importLocalWorkspace, resolveSyncConflict, syncWorkspace } from './lib/sync';
@@ -27,8 +27,11 @@ import { readOAuthReturn } from './lib/oauth-return';
 import { LibrarySort } from './components/LibrarySort';
 import { readLibrarySorts, sortLibraryRecords, storeLibrarySorts } from './lib/library-sort';
 import { APP_VERSION } from './lib/version';
+import { observeNoteSession, hasGoogleIdentity, type NoteSessionState } from './lib/note-session';
+import { SignInScreen } from './components/SignInScreen';
+import { cloudFetch } from './lib/request-timeout';
 
-type Dialog = { kind: 'folder' | 'board' | 'rename' | 'move'; record?: Board | Folder } | { kind: 'settings' | 'auth' | 'help' | 'search' } | null;
+type Dialog = { kind: 'folder' | 'board' | 'rename' | 'move'; record?: Board | Folder } | { kind: 'settings' | 'help' | 'search' } | null;
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 function download(name: string, blob: Blob) { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function relativeDate(date: string) {
@@ -45,13 +48,52 @@ function importedCreation(record: { createdAt?: unknown; createdAtEstimated?: un
 function readSidebarCollapsed() { try { return localStorage.getItem('note-sidebar-collapsed') === 'true'; } catch { return false; } }
 
 export default function App() {
+  const [client] = useState(getSupabase);
   const [oauthReturn] = useState(() => readOAuthReturn(location.href));
-  const [authError, setAuthError] = useState(oauthReturn?.message || '');
+  const [auth, setAuth] = useState<NoteSessionState>({ phase: 'loading', session: null, error: null });
+  const [loginError, setLoginError] = useState(oauthReturn?.message || '');
+  const [loginBusy, setLoginBusy] = useState(false);
+  const observer = useRef<ReturnType<typeof observeNoteSession> | null>(null);
+  const sessionRef = useRef(auth.session); sessionRef.current = auth.session;
+  const googleSession = hasGoogleIdentity(auth.session);
+  useEffect(() => {
+    const applyTheme = () => { document.documentElement.dataset.theme = getSettings().theme; };
+    applyTheme(); return watchSettings(applyTheme);
+  }, []);
+  useEffect(() => { if (oauthReturn) history.replaceState(history.state, '', oauthReturn.url); }, [oauthReturn]);
+  useEffect(() => {
+    if (!client) { setAuth({ phase: 'error', session: null, error: 'Google sign-in is unavailable in this version. Please try again later.' }); return; }
+    const active = observeNoteSession(client, setAuth); observer.current = active;
+    return () => { active.dispose(); if (observer.current === active) observer.current = null; };
+  }, [client]);
+  useEffect(() => {
+    // An unknown/loading login must not clear a cached Drive connection.
+    if (auth.phase === 'signed-out' || (auth.session && !googleSession)) disconnectDrive();
+  }, [auth.phase, auth.session?.user.id, googleSession]);
+  async function signInWithGoogle() {
+    if (!client) return;
+    setLoginBusy(true); setLoginError('');
+    const owner = sessionRef.current?.user.id;
+    try {
+      const response = await cloudFetch(`${appConfig.supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, { headers: { apikey: appConfig.supabaseKey } });
+      if (!response.ok) throw new Error('Could not check Google sign-in. Check your connection and try again.');
+      if (!(await response.json()).external?.google) throw new Error('Google sign-in is not available yet. Please try again later.');
+      const url = await googleSignInUrl(client, new URL(import.meta.env.BASE_URL, location.href).href, sessionRef.current?.user.email);
+      if (sessionRef.current?.user.id !== owner) throw new Error('Your account changed. Please try again.');
+      storeSettings({ ...getSettings(), imageStore: 'drive' });
+      location.assign(url);
+    } catch (error) { setLoginError(messageOf(error)); throw error; }
+    finally { setLoginBusy(false); }
+  }
+  const retrySession = () => { setLoginError(''); void observer.current?.retry(); };
+  if (!googleSession) return <SignInScreen loading={auth.phase === 'loading'} busy={loginBusy} configured={!!client} error={loginError || auth.error || ''} recovering={auth.phase === 'error'} existingEmail={auth.session?.user.email} onGoogle={() => { void signInWithGoogle().catch(() => {}); }} onRetry={retrySession} />;
+  return <Workspace key={auth.session!.user.id} session={auth.session!} client={client!} onGoogle={signInWithGoogle} sessionNotice={loginError || auth.error} onRetrySession={retrySession} />;
+}
+
+function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }: { session: Session; client: SupabaseClient; onGoogle: () => Promise<void>; sessionNotice: string | null; onRetrySession: () => void }) {
   const [settings, setSettings] = useState<Settings>(getSettings);
-  const [session, setSession] = useState<Session | null>(null);
-  const [authReady, setAuthReady] = useState(false);
   const [driveStatus, setDriveStatus] = useState(getDriveStatus);
-  const scope = session?.user.id || 'local';
+  const scope = session.user.id;
   const [workspace, setWorkspace] = useState<{ folders: Folder[]; boards: Board[] }>({ folders: [], boards: [] });
   const [librarySorts, setLibrarySorts] = useState(readLibrarySorts);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -62,7 +104,7 @@ export default function App() {
   const [jumpId, setJumpId] = useState<string>();
   const [view, setView] = useState<'library' | 'trash'>('library');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<Dialog>(oauthReturn ? { kind: 'auth' } : null);
+  const [dialog, setDialog] = useState<Dialog>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
@@ -86,7 +128,6 @@ export default function App() {
   const dirtyVersions = useRef(new Map<string, string>());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
-  const client = getSupabase();
   const currentBoard = workspace.boards.find(x => x.id === boardId);
   const currentImages = currentBoard && boardImages?.boardKey === currentBoard.key ? boardImages : undefined;
   const imagesLoading = !!currentImages?.loading;
@@ -103,28 +144,15 @@ export default function App() {
   useEffect(() => storeLibrarySorts(librarySorts), [librarySorts]);
   useEffect(() => { try { localStorage.setItem('note-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* Collapsing still works without browser storage. */ } }, [sidebarCollapsed]);
   useEffect(() => {
-    if (oauthReturn) history.replaceState(history.state, '', oauthReturn.url);
-  }, [oauthReturn]);
-  useEffect(() => {
-    void seedLocal().catch(error => message(messageOf(error)));
     const event = (event: Event) => { event.preventDefault(); setInstallEvent(event as InstallEvent); };
     window.addEventListener('beforeinstallprompt', event);
     return () => window.removeEventListener('beforeinstallprompt', event);
   }, []);
   useEffect(() => {
-    if (!client) { setSession(null); setAuthReady(true); return; }
-    let alive = true, observedAuth = false;
-    void client.auth.getSession().then(({ data, error }) => {
-      if (!alive || observedAuth) return;
-      if (error) { message(messageOf(error)); return; }
-      setSession(data.session); setAuthReady(true);
-    }).catch(error => { if (alive) message(messageOf(error)); });
-    const { data } = client.auth.onAuthStateChange((_event, session) => {
-      if (!alive) return;
-      observedAuth = true; setSession(session); setAuthReady(true);
-    });
-    return () => { alive = false; data.subscription.unsubscribe(); };
-  }, [client]);
+    // Invalidate pending sync work before another account mounts its workspace.
+    activeScope.current = scope;
+    return () => { activeScope.current = ''; clearTimeout(idleSyncTimer.current); clearTimeout(toastTimer.current); };
+  }, [scope]);
   useEffect(() => {
     let previous = getDriveStatus();
     setDriveStatus(previous);
@@ -139,14 +167,12 @@ export default function App() {
     });
   }, [message]);
   useEffect(() => {
-    // The initial null value means the Note login has not loaded yet. It must
-    // not clear the scoped Drive lease before getSession resolves.
-    if (!authReady) return;
+    // The outer sign-in gate mounts this component only for a restored account.
     void useGoogleDriveSession(session, client).catch(() => {
       // Drive status distinguishes consent, app setup, and temporary failures;
       // image and upload panels surface the appropriate recovery action.
     });
-  }, [authReady, client, session?.user.id, session?.provider_token, session?.provider_refresh_token]);
+  }, [client, session.user.id, session.provider_token, session.provider_refresh_token]);
   useEffect(() => {
     setFolderId(null); setBoardId(null); setWorkspace({ folders: [], boards: [] }); setAssets([]); setView('library');
     setSyncStatus(scope === 'local' ? 'Saved on this device' : 'Ready to sync');
@@ -159,7 +185,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, [scope]);
   const sync = useCallback(async (manual = true) => {
-    if (!authReady || !client || scope === 'local' || activeScope.current !== scope) return;
+    if (activeScope.current !== scope) return;
     const promise = syncRunner.current.request(async () => {
       if (activeScope.current !== scope) return;
       setSyncing(true);
@@ -195,13 +221,13 @@ export default function App() {
     syncPromise.current = promise;
     await promise;
     if (syncPromise.current === promise) syncPromise.current = null;
-  }, [authReady, client, scope, settings, message]);
+  }, [client, scope, settings, message]);
   useEffect(() => {
     void sync();
     const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void sync(false); }, SYNC_POLL_MS);
     let lastWake = 0;
     const refreshDrive = () => {
-      if (authReady && scope !== 'local') void ensureDriveAccess(scope).catch(() => {});
+      void ensureDriveAccess(scope).catch(() => {});
     };
     const wake = () => {
       if (document.visibilityState === 'hidden' || Date.now() - lastWake < 1000) return;
@@ -217,7 +243,7 @@ export default function App() {
     window.addEventListener('focus', wake); window.addEventListener('pageshow', wake);
     document.addEventListener('visibilitychange', visibility);
     return () => { clearInterval(timer); window.removeEventListener('online', online); window.removeEventListener('offline', offline); window.removeEventListener('focus', wake); window.removeEventListener('pageshow', wake); document.removeEventListener('visibilitychange', visibility); clearTimeout(idleSyncTimer.current); };
-  }, [authReady, scope, sync, driveRevision]);
+  }, [scope, sync, driveRevision]);
   useEffect(() => {
     if (scope === 'local') return;
     const versions = new Map<string, string>();
@@ -237,15 +263,9 @@ export default function App() {
   }, [assets, settings.ocrEnabled]);
   async function flushCanvas() { await canvasRef.current?.flush(); }
   async function signInWithGoogle() {
-    if (!client) throw new Error('Cloud sync is not available in this version.');
     await flushCanvas(); await syncPromise.current;
-    const providerResponse = await fetch(`${appConfig.supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, { headers: { apikey: appConfig.supabaseKey } });
-    if (!providerResponse.ok) throw new Error('Could not check Google sign-in. Check your connection and try again.');
-    if (!(await providerResponse.json()).external?.google) throw new Error('Google sign-in is not set up yet. The app owner needs to enable Google in Supabase.');
-    const url = await googleSignInUrl(client, new URL(import.meta.env.BASE_URL, location.href).href, session?.user.email);
-    const next = { ...settings, imageStore: 'drive' as const };
-    setSettings(next); storeSettings(next);
-    location.assign(url);
+    if (activeScope.current !== scope) return;
+    await onGoogle();
   }
   async function navigateFolder(id: string | null) {
     try { await flushCanvas(); setBoardId(null); setFolderId(id); setView('library'); setJumpId(undefined); setMenuFor(null); setSidebarOpen(false); }
@@ -419,12 +439,13 @@ export default function App() {
         <button className="nav-row" onClick={() => setDialog({ kind: 'help' })}><Keyboard size={16} /><span>Keyboard shortcuts</span><kbd>?</kbd></button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'settings' })}><SettingsIcon size={16} /><span>Settings & storage</span></button>
         <nav className="legal-links" aria-label="About and policies"><a href="./about.html" target="_blank" rel="noreferrer">About</a><a href="./privacy.html" target="_blank" rel="noreferrer">Privacy</a><a href="./terms.html" target="_blank" rel="noreferrer">Terms</a></nav>
-        <div className="account-box"><span className="avatar">{session?.user.email?.[0]?.toUpperCase() || 'Y'}</span><div><strong>{session?.user.email || 'Your workspace'}</strong><span>{scope === 'local' ? 'On this device' : settings.imageStore === 'drive' ? 'Supabase + Google Drive' : 'Supabase cloud'}</span></div><button className="icon-button" aria-label={session ? 'Account settings' : 'Sign in to sync'} onClick={() => setDialog({ kind: session ? 'settings' : 'auth' })}><ArrowUpRight size={17} /></button></div>
+        <div className="account-box"><span className="avatar">{session?.user.email?.[0]?.toUpperCase() || 'Y'}</span><div><strong>{session?.user.email || 'Your workspace'}</strong><span>{scope === 'local' ? 'On this device' : settings.imageStore === 'drive' ? 'Supabase + Google Drive' : 'Supabase cloud'}</span></div><button className="icon-button" aria-label={'Account settings'} onClick={() => setDialog({ kind: 'settings' })}><ArrowUpRight size={17} /></button></div>
       </div>
     </aside>
     <main className="main-content">
+      {sessionNotice && <div className="session-recovery" role="status"><span>{sessionNotice}</span><button type="button" onClick={onRetrySession}>Retry connection</button></div>}
       <header className="topbar"><div className="topbar-left"><button className="icon-button desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!sidebarCollapsed} aria-controls="note-sidebar" onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><button onClick={() => void navigateFolder(null)}><Grid2X2 size={14} /> Workspace</button>{path.map(folder => <span key={folder.id}><ChevronRight size={13} /><button onClick={() => void navigateFolder(folder.id)}>{folder.name}</button></span>)}{currentBoard && <span><ChevronRight size={13} /><button className="breadcrumb-current" onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>{currentBoard.name}</button></span>}</div></div>
-        <div className="topbar-actions"><a className="app-version" href="./updates.html" target="_blank" rel="noreferrer" aria-label={`Note version ${APP_VERSION}. View version updates`}>v{APP_VERSION}</a><button className={`save-status ${syncing ? 'is-syncing' : ''} ${syncFailed || imageFailed ? 'sync-attention' : ''}`} aria-label={scope === 'local' ? 'Saved locally. Sign in to sync' : `Sync now. ${syncing ? 'Syncing; click to queue another pass' : syncStatus}${imageSummary ? ` · ${imageSummary}` : ''}`} aria-busy={syncing || imagesLoading} title={scope === 'local' ? syncStatus : `${syncStatus}${dirtyCount ? ` · ${pendingLabel} waiting` : ''}${imageSummary ? ` · ${imageSummary}` : ''}`} onClick={() => scope === 'local' ? setDialog({ kind: 'auth' }) : void sync()}>{syncing || imagesLoading ? <Loader2 size={14} className="spinning" /> : scope === 'local' ? <CloudOff size={14} /> : syncFailed || imageFailed ? <TriangleAlert size={14} /> : dirtyCount ? <RefreshCw size={14} /> : <Check size={14} />}<span>{scope === 'local' ? 'Saved locally' : syncing ? 'Syncing' : syncFailed ? 'Sync needs attention' : dirtyCount ? `${pendingSync.some(item => item.kind !== pendingSync[0].kind) ? `${dirtyCount} items` : pendingLabel} pending` : imageFailed ? 'Images need attention' : imagesLoading ? 'Loading images' : syncStatus.startsWith('Everything') ? 'Synced' : 'Check sync'}</span></button>{scope !== 'local' && <button className="icon-button sync-details-trigger" aria-label="Sync details" title="See what is waiting and why" onClick={() => setSyncDetails(true)}><CircleHelp size={16} /></button>}{currentBoard && <><span className="board-chrome-quick-slot" /><button className="icon-button board-chrome-trigger" aria-label="Board toolbar visibility" title="Show or hide board toolbars" onClick={() => canvasRef.current?.toggleControls()}><PanelsTopLeft size={18} /><span>Toolbars</span></button></>}{installEvent && <button className="icon-button" title="Install Note" aria-label="Install Note" onClick={() => void installEvent.prompt().then(() => setInstallEvent(null))}><ArrowDownToLine size={17} /></button>}
+        <div className="topbar-actions"><a className="app-version" href="./updates.html" target="_blank" rel="noreferrer" aria-label={`Note version ${APP_VERSION}. View version updates`}>v{APP_VERSION}</a><button className={`save-status ${syncing ? 'is-syncing' : ''} ${syncFailed || imageFailed ? 'sync-attention' : ''}`} aria-label={scope === 'local' ? 'Saved locally. Sign in to sync' : `Sync now. ${syncing ? 'Syncing; click to queue another pass' : syncStatus}${imageSummary ? ` · ${imageSummary}` : ''}`} aria-busy={syncing || imagesLoading} title={scope === 'local' ? syncStatus : `${syncStatus}${dirtyCount ? ` · ${pendingLabel} waiting` : ''}${imageSummary ? ` · ${imageSummary}` : ''}`} onClick={() => scope === 'local' ? setDialog({ kind: 'settings' }) : void sync()}>{syncing || imagesLoading ? <Loader2 size={14} className="spinning" /> : scope === 'local' ? <CloudOff size={14} /> : syncFailed || imageFailed ? <TriangleAlert size={14} /> : dirtyCount ? <RefreshCw size={14} /> : <Check size={14} />}<span>{scope === 'local' ? 'Saved locally' : syncing ? 'Syncing' : syncFailed ? 'Sync needs attention' : dirtyCount ? `${pendingSync.some(item => item.kind !== pendingSync[0].kind) ? `${dirtyCount} items` : pendingLabel} pending` : imageFailed ? 'Images need attention' : imagesLoading ? 'Loading images' : syncStatus.startsWith('Everything') ? 'Synced' : 'Check sync'}</span></button>{scope !== 'local' && <button className="icon-button sync-details-trigger" aria-label="Sync details" title="See what is waiting and why" onClick={() => setSyncDetails(true)}><CircleHelp size={16} /></button>}{currentBoard && <><span className="board-chrome-quick-slot" /><button className="icon-button board-chrome-trigger" aria-label="Board toolbar visibility" title="Show or hide board toolbars" onClick={() => canvasRef.current?.toggleControls()}><PanelsTopLeft size={18} /><span>Toolbars</span></button></>}{installEvent && <button className="icon-button" title="Install Note" aria-label="Install Note" onClick={() => void installEvent.prompt().then(() => setInstallEvent(null))}><ArrowDownToLine size={17} /></button>}
         {currentBoard ? <div className="board-options"><button className="icon-button" aria-label="Board options" onClick={() => setMenuFor(menuFor === currentBoard.id ? null : currentBoard.id)}><MoreHorizontal size={21} /></button>{menuFor === currentBoard.id && <div className="item-menu board-menu"><button onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>Rename</button><button onClick={() => setDialog({ kind: 'move', record: currentBoard })}>Move to folder</button><button onClick={() => void canvasRef.current?.exportPng().then(blob => { if (blob) download(`${currentBoard.name}.png`, blob); else message('Add something to the board first.'); }).catch(error => message(messageOf(error)))}>Export PNG</button><button className="danger" onClick={() => void moveToTrash(currentBoard)}>Move to Trash</button></div>}</div> : <button className="icon-button" aria-label="Search workspace" onClick={openSearch}><Search size={18} /></button>}</div>
       </header>
       {needRefresh && <div className="update-banner"><span>A new version of Note is ready.</span><button onClick={() => void flushCanvas().then(() => updateServiceWorker(true)).catch(error => message(messageOf(error)))}>Save and update <RefreshCw size={13} /></button></div>}
@@ -432,7 +453,6 @@ export default function App() {
       {currentBoard ? <div className="editor-container"><BoardCanvas key={currentBoard.key} ref={canvasRef} board={currentBoard} settings={settings} client={client} onSaved={() => { if (scope === 'local') setSyncStatus('Saved on this device'); }} onMessage={message} onImageState={imageStateChanged} jumpId={jumpId} /></div>
         : view === 'trash' ? <section className="library"><div className="library-intro trash-heading"><div><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore an item, or delete it permanently.</p></div>{trash.length > 0 && <button className="secondary-button danger" onClick={() => void requestTrashDelete().catch(error => message(messageOf(error)))}><Trash2 size={15} />Empty Trash</button>}</div>{trash.length ? <div className="trash-list">{trash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><div className="trash-item-actions"><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button><button className="secondary-button danger" aria-label={`Delete ${record.name} permanently`} onClick={() => void requestTrashDelete(record).catch(error => message(messageOf(error)))}>Delete permanently</button></div></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
         : <section className="library"><div className="library-intro"><p className="eyebrow">YOUR SPACE TO THINK</p><div className="library-title"><h1>{currentFolder?.name || 'A little room for big ideas.'}</h1>{currentFolder && <button className="icon-button" aria-label="Rename current folder" onClick={() => setDialog({ kind: 'rename', record: currentFolder })}><MoreHorizontal size={22} /></button>}</div><p>{currentFolder ? 'Keep everything together. Give every thought a little space.' : 'Collect the things that spark something. Make sense of them here.'}</p></div>
-          {scope === 'local' && <div className="sync-banner"><span className="banner-icon"><Cloud size={21} /></span><div><strong>Your ideas, wherever you are.</strong><p>{client ? 'Sign in to open your cloud boards on your other devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p></div>{client && <button onClick={() => setDialog({ kind: 'auth' })}>Sign in to sync <ArrowUpRight size={15} /></button>}</div>}
           <div className="section-heading library-section-heading"><h2>Folders <span>{directFolders.length}</span></h2><div className="library-actions"><LibrarySort label="Sort folders" value={librarySorts.folders} onChange={value => setLibrarySorts(previous => ({ ...previous, folders: value }))} /><button onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={15} /> New folder</button></div></div>
           {librarySorts.folders.startsWith('created') && directFolders.some(item => !item.createdAt || item.createdAtEstimated) && <p className="library-sort-note">Older items use their earliest recorded date.</p>}
           <div className="folder-grid">{directFolders.map(folder => <div className="folder-card" key={folder.id}><button className="folder-card-main" onClick={() => void navigateFolder(folder.id)}><FolderIcon size={31} fill={folder.color} color={folder.color} /><span><strong>{folder.name}</strong><small>{workspace.boards.filter(x => x.folderId && descendantFolderIds(workspace.folders, folder.id).has(x.folderId)).length} boards</small></span></button><button className="card-menu-button icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={17} /></button>{menuFor === folder.id && recordMenu(folder)}</div>)}</div>
@@ -454,8 +474,8 @@ export default function App() {
     {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image or text', 'Ctrl V'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Stamp last icon', 'I'], ['Stop stamping', 'Esc'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
     {deleteTrash && <DeleteTrashDialog selection={deleteTrash.selection} empty={deleteTrash.empty} cloud={deleteTrash.scope !== 'local'} onClose={() => setDeleteTrash(null)} onDelete={confirmTrashDelete} />}
     {syncDetails && session && <SyncDetails account={session.user.email || session.user.id} status={syncStatus} pending={pendingSync} syncing={syncing} lastChecked={lastChecked} lastSynced={lastSynced} conflicts={[...workspace.boards, ...workspace.folders, ...trash].filter(record => !!record.syncConflict)} onResolveConflict={chooseSyncVersion} images={currentImages} onRetryImages={() => void canvasRef.current?.reloadImages()} onSync={sync} onClose={() => setSyncDetails(false)} />}
-    {dialog?.kind === 'settings' && <SettingsDialog cloudConfigured={!!client} settings={settings} session={session} driveStatus={driveStatus} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignIn={() => setDialog({ kind: 'auth' })} onSignOut={async () => { await flushCanvas(); await syncPromise.current; await client?.auth.signOut(); disconnectDrive(); message('Signed out. Your cloud boards stay in your account.'); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
-    {dialog?.kind === 'auth' && <AuthDialog configured={!!client} client={client} initialError={authError} onGoogle={signInWithGoogle} onClose={() => { setDialog(null); setAuthError(''); }} onComplete={() => { setDialog(null); setAuthError(''); message('Signed in. Your device boards are separate; copy them from Settings if you want.'); }} />}
+    {dialog?.kind === 'settings' && <SettingsDialog settings={settings} session={session} driveStatus={driveStatus} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignOut={async () => { await flushCanvas(); await syncPromise.current; const { error } = await client.auth.signOut({ scope: 'local' }); if (error) throw error; disconnectDrive(); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
+
   </div>;
 }
 
@@ -470,35 +490,7 @@ function MoveDialog({ record, folders, onClose, onMove }: { record: Board | Fold
 function SearchResult({ match, folders, onOpen }: { match: SearchMatch; folders: Folder[]; onOpen: () => void }) {
   return <button className="search-result" onClick={onOpen}><span className={`result-icon ${match.kind}`}>{match.kind === 'image' ? <Image size={18} /> : <StickyNote size={18} />}</span><span><strong>{match.board.name}</strong><small>{folderPath(folders, match.board.folderId).map(x => x.name).join(' / ') || 'Workspace'} · {match.kind === 'image' ? 'Image text' : match.kind === 'title' ? 'Board name' : match.kind === 'handwriting' ? 'Handwriting' : 'Typed note'}</small><p>{match.text.slice(0, 240)}</p></span><ArrowUpRight size={17} /></button>;
 }
-function AuthDialog({ configured, client, initialError, onGoogle, onClose, onComplete }: { configured: boolean; client: ReturnType<typeof getSupabase>; initialError: string; onGoogle: () => Promise<void>; onClose: () => void; onComplete: () => void }) {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
-  const [signup, setSignup] = useState(false); const [useEmail, setUseEmail] = useState(false);
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(initialError); const [notice, setNotice] = useState('');
-  function action(work: () => Promise<void>) {
-    setBusy(true); setError(''); setNotice('');
-    void work().catch(error => setError(messageOf(error))).finally(() => setBusy(false));
-  }
-  return <Modal title={configured ? 'Your workspace, anywhere' : 'Cloud sync unavailable'} onClose={onClose}>
-    {!configured ? <><p className="dialog-description">Cloud sync is not available in this version. You can keep using Note and saving boards on this device.</p><div className="dialog-actions"><button className="secondary-button" onClick={onClose}>Stay on this device</button></div></> : <>
-      <p className="dialog-description">Sign in with Google to keep your boards in your private workspace and save new images to your own Google Drive.</p>
-      <p className="small-note">Cloud notes are accessible to the service operator. Read the <a href="./privacy.html" target="_blank" rel="noreferrer">privacy policy</a> and <a href="./terms.html" target="_blank" rel="noreferrer">terms of service</a> before signing in.</p>
-      <button type="button" className="google-sign-in" disabled={busy} onClick={() => action(onGoogle)}>{busy ? 'Please wait…' : 'Continue with Google'}</button>
-      <p className="small-note">Google will ask permission to save images in a private “Note images” folder. Your other Drive files stay outside the app’s access.</p>
-      <button type="button" className="text-button email-choice" disabled={busy} onClick={() => { setUseEmail(!useEmail); setError(''); setNotice(''); }}>{useEmail ? 'Hide email sign-in' : 'Use email instead'}</button>
-      {useEmail && <form onSubmit={event => { event.preventDefault(); action(async () => {
-        const response = signup ? await client!.auth.signUp({ email, password, options: { emailRedirectTo: new URL(import.meta.env.BASE_URL, location.href).href } }) : await client!.auth.signInWithPassword({ email, password });
-        if (response.error) throw response.error;
-        if (response.data.session) onComplete(); else setNotice('Check your email to confirm your account, then sign in.');
-      }); }}>
-        <label>Email<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
-        <label>Password<input type="password" autoComplete={signup ? 'new-password' : 'current-password'} minLength={8} required value={password} onChange={event => setPassword(event.target.value)} /></label>
-        <div className="dialog-actions"><button type="button" className="text-button" disabled={busy} onClick={() => setSignup(!signup)}>{signup ? 'Already have an account?' : 'Create an account'}</button><button className="primary-button" disabled={busy}>{busy ? 'Please wait…' : signup ? 'Create account' : 'Sign in'}</button></div>
-      </form>}
-      {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
-    </>}
-  </Modal>;
-}
-function SettingsDialog({ cloudConfigured, settings, session, driveStatus, syncStatus, assets, syncing, onSyncNow, onSyncDetails, onClose, onSave, onSignIn, onSignOut, onConnectDrive, onExport, onImport, onImportLocal, onRetryOcr }: { cloudConfigured: boolean; settings: Settings; session: Session | null; driveStatus: DriveStatus; syncStatus: string; assets: Asset[]; syncing: boolean; onSyncNow: () => Promise<void>; onSyncDetails: () => void; onClose: () => void; onSave: (settings: Settings) => Promise<void>; onSignIn: () => void; onSignOut: () => Promise<void>; onConnectDrive: () => Promise<void>; onExport: () => Promise<void>; onImport: (file: File) => Promise<void>; onImportLocal: () => Promise<void>; onRetryOcr: () => Promise<void> }) {
+function SettingsDialog({ settings, session, driveStatus, syncStatus, assets, syncing, onSyncNow, onSyncDetails, onClose, onSave, onSignOut, onConnectDrive, onExport, onImport, onImportLocal, onRetryOcr }: { settings: Settings; session: Session; driveStatus: DriveStatus; syncStatus: string; assets: Asset[]; syncing: boolean; onSyncNow: () => Promise<void>; onSyncDetails: () => void; onClose: () => void; onSave: (settings: Settings) => Promise<void>; onSignOut: () => Promise<void>; onConnectDrive: () => Promise<void>; onExport: () => Promise<void>; onImport: (file: File) => Promise<void>; onImportLocal: () => Promise<void>; onRetryOcr: () => Promise<void> }) {
   const [draft, setDraft] = useState(settings); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const [tab, setTab] = useState<'cloud' | 'storage' | 'preferences'>('cloud');
   const fileRef = useRef<HTMLInputElement>(null);
   const currentDrive = driveStatus.owner === session?.user.id ? driveStatus : undefined;
@@ -507,7 +499,7 @@ function SettingsDialog({ cloudConfigured, settings, session, driveStatus, syncS
   const temporarySetup = currentDrive?.phase === 'temporary' && currentDrive.setupNeeded;
   function action(work: () => Promise<void>) { setError(''); setBusy(true); void work().catch(error => setError(messageOf(error))).finally(() => setBusy(false)); }
   return <Modal title="Make Note yours" wide onClose={onClose}><p className="settings-version">Note v{APP_VERSION} · <a href="./updates.html" target="_blank" rel="noreferrer">Version updates</a></p><div className="settings-tabs">{(['cloud', 'storage', 'preferences'] as const).map(value => <button key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value === 'cloud' ? 'Cloud sync' : value === 'storage' ? 'Images & search' : 'Preferences & backup'}</button>)}</div><form onSubmit={event => { event.preventDefault(); action(async () => { await onSave(draft); setNotice('Settings saved.'); }); }}>
-    {tab === 'cloud' && <><p className="dialog-description">{cloudConfigured ? 'Sign in to sync your folders, boards, and images across devices.' : 'Cloud sync is not available in this version. Your boards stay saved on this device.'}</p><div className="settings-account"><span><Cloud size={18} /><strong>{session?.user.email || 'Not signed in'}</strong></span><button type="button" className="secondary-button" disabled={busy || !cloudConfigured} onClick={() => session ? action(onSignOut) : onSignIn()}>{session ? 'Sign out' : 'Sign in'}</button></div><p className="small-note sync-detail">{syncStatus}</p>{session && <div className="board-chrome-presets"><button type="button" className="secondary-button" disabled={syncing || busy} onClick={() => action(onSyncNow)}>{syncing ? 'Syncing…' : 'Sync now'}</button><button type="button" className="secondary-button" onClick={onSyncDetails}>View sync details</button></div>}{session && <button className="secondary-button" type="button" disabled={busy} onClick={() => action(onImportLocal)}>Copy this device’s boards into my account</button>}</>}
+    {tab === 'cloud' && <><p className="dialog-description">Your Google account stays signed in on this browser. Note renews your session automatically in the background.</p><div className="settings-account"><span><Cloud size={18} /><strong>{session?.user.email || 'Not signed in'}</strong></span><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onSignOut)}>Sign out</button></div><p className="small-note sync-detail">{syncStatus}</p>{session && <div className="board-chrome-presets"><button type="button" className="secondary-button" disabled={syncing || busy} onClick={() => action(onSyncNow)}>{syncing ? 'Syncing…' : 'Sync now'}</button><button type="button" className="secondary-button" onClick={onSyncDetails}>View sync details</button></div>}{session && <button className="secondary-button" type="button" disabled={busy} onClick={() => action(onImportLocal)}>Copy this device’s boards into my account</button>}</>}
     {tab === 'storage' && <><p className="dialog-description">Paste an image onto a board. Note saves it in the background.</p><label>Store new images in<select value={draft.imageStore} onChange={event => setDraft({ ...draft, imageStore: event.target.value as Settings['imageStore'] })}><option value="supabase">Supabase Storage</option><option value="drive">My Google Drive — private “Note images” folder</option></select></label><p className="small-note">Google sign-in automatically selects Drive for new images. Existing images stay in their original storage. Open a board to retrieve its images; any missing files show loading details and Retry images above the canvas.</p>{(needsDriveConsent || canEnableSavedAccess || temporarySetup) && <button type="button" className="secondary-button" disabled={busy} onClick={() => action(onConnectDrive)}>{canEnableSavedAccess ? 'Enable saved Drive access' : currentDrive?.phase === 'reconnect' || temporarySetup ? 'Reconnect Google Drive' : 'Connect Google Drive'} <ArrowUpRight size={15} /></button>}<p className="small-note" role="status">{currentDrive?.message || 'Connect Google Drive to load saved images and upload new files.'}</p>{currentDrive?.setupNeeded && <p className="small-note">The app owner can enable automatic renewal using the <a href="https://github.com/augustof2022/notes/blob/main/supabase/functions/drive-session/README.md" target="_blank" rel="noreferrer">Drive setup guide</a>.</p>}<div className="upload-status"><strong>{assets.filter(x => x.dirty).length} image{assets.filter(x => x.dirty).length === 1 ? '' : 's'} waiting to sync</strong><p role="status">{syncStatus}</p>{assets.filter(x => x.dirty && x.syncError).slice(0, 3).map(asset => <p key={asset.key} className="upload-error">{asset.syncError}</p>)}<button type="button" className="secondary-button" disabled={busy || syncing || !session} onClick={() => action(async () => { await onSyncNow(); setNotice('Sync attempt finished. Check the upload status above.'); })}>{syncing ? 'Uploading…' : 'Retry uploads now'}</button><p className="small-note">Keep Note open on the device where you added the images until syncing finishes. The Drive status above explains any action needed.</p></div><label className="toggle-row"><span><strong>Search words in images</strong><small>Free English OCR runs on your device.</small></span><input type="checkbox" checked={draft.ocrEnabled} onChange={event => setDraft({ ...draft, ocrEnabled: event.target.checked })} /></label><button type="button" className="text-button" disabled={busy} onClick={() => action(onRetryOcr)}>Retry unread images</button></>}
     {tab === 'preferences' && <><label>Appearance<select value={draft.theme} onChange={event => setDraft({ ...draft, theme: event.target.value as Settings['theme'] })}><option value="light">Light — a quiet place to think</option><option value="dark">Dark — for late-night ideas</option></select></label><div className="backup-block"><h3>Keep a copy of your ideas</h3><p>Export your workspace, including images and screenshot text, as a portable backup. Importing creates new boards.</p><div><button type="button" className="secondary-button" disabled={busy} onClick={() => action(onExport)}><ArrowDownToLine size={16} /> Export backup</button><button type="button" className="secondary-button" disabled={busy} onClick={() => fileRef.current?.click()}>Import backup</button></div><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={event => { const file = event.target.files?.[0]; if (file) action(() => onImport(file)); event.target.value = ''; }} /></div><p className="small-note">Local boards belong to this browser. Export a backup before clearing browser data.</p></>}
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Done</button><button className="primary-button" disabled={busy}>{busy ? 'Please wait…' : 'Save settings'}</button></div></form></Modal>;

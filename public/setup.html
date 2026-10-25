@@ -9,6 +9,7 @@
 </head>
 <body>
 <header><a href="./">← Back to Note</a><h1>Google login. Your own Drive.</h1><p>A step-by-step guide for the app owner. Complete this once; each person can then sign in with their Google account.</p></header>
+<div class="callout"><strong>Open your workspace with Google.</strong> Choose Continue with Google to sign in or create your Note account. Note remembers a valid login and refreshes it in the background; opening the app again does not require a new consent each time. About, updates, privacy, and terms stay public. The v0.8.0 login change needs no new Supabase SQL migration.</div>
 <div class="callout"><strong>Initial sign-in and sync were previously verified.</strong> Google sign-in, board sync to Supabase, and a private image upload to your Google Drive were verified. Open Note with the same Google account on your other devices. The steps below document the setup for future reference.</div>
 <table aria-label="Setup checklist"><thead><tr><th>Setup</th><th>Status</th></tr></thead><tbody>
 <tr><td>GitHub Pages website</td><td class="done">Complete</td></tr>
@@ -85,7 +86,7 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 <li>In Google Drive, look for <strong>Note images</strong> and the uploaded image. In Supabase Authentication → Users, your new Note login should appear. Board and image-reference records will appear in the Note tables.</li>
 <li>Open Note on your phone or another browser, sign in with the same Google account, and check that the typed note and screenshot appear.</li>
 </ol>
-<p>For boards created before signing in, use <strong>Settings &amp; storage → Cloud sync → Copy this device's boards into my account</strong>. Device boards and signed-in boards stay separate until you copy them.</p>
+<p>For boards created before signing in, use <strong>Settings &amp; storage → Cloud sync → Copy this device's boards into my account</strong>. Device boards and signed-in boards stay separate until you explicitly copy them; login never imports them automatically. Signing out returns to the login screen and preserves the existing local data.</p>
 <h2>If something fails</h2>
 <table aria-label="Setup troubleshooting"><thead><tr><th>What you see</th><th>What to check</th></tr></thead><tbody>
 <tr><td>Google sign-in is not set up yet</td><td>Enable Google in Supabase and save its credentials.</td></tr>
@@ -98,11 +99,14 @@ https://www.googleapis.com/auth/drive.file</code><button data-copy="scopes">Copy
 </tbody></table>
 <p>Google credential changes can take time to propagate. After correcting values, allow a few minutes before trying again.</p>
 <p>Google displays a warning for test-user authorization, and authorizations in Testing expire after seven days when Drive scopes are requested. Reconnect when Google asks. <a href="https://support.google.com/cloud/answer/15549945?hl=en" target="_blank" rel="noreferrer">Google's testing and audience documentation</a>.</p>
+<h2>Remembered login and offline use</h2>
+<p>Note’s saved login session is separate from Google Drive access. A valid remembered Google-linked Note session can reopen cached boards offline. Expired-session renewal, new sign-in, sync, and uncached image retrieval need internet. Temporary network failures are retried; revoked sessions or Google consent and provider security requirements can legitimately require signing in or reconnecting.</p>
+<p>The app now offers Google entry only; this frontend change does not disable other Supabase authentication providers. If you previously used an email-only Note account, Continue with Google must link to that existing account to open its workspace. Contact the operator if a separate account opens; this release does not move boards between account IDs.</p>
 <h2>Costs, access and reconnecting</h2>
 <p>Standard Drive API use is currently available at no additional cost within Google's quotas; your Drive storage allowance applies. This setup uses OAuth and Drive API. It does not need Cloud Run, a service account, an API key or a paid OCR service. <a href="https://developers.google.com/workspace/drive/api/guides/limits" target="_blank" rel="noreferrer">Current Drive limits and pricing</a>.</p>
 <p>Testing gets your own account working. For users outside the test-user list, review <strong>Audience → Publish app</strong> and any branding or verification requirements Google shows. Public GitHub code does not publish your boards or share Drive files.</p>
 <h2 id="drive-renewal">Keep Drive connected for uploads and image loading</h2>
-<p>Note remembers a verified short-lived Drive connection across reloads. For automatic renewal after Google expires that access, the app owner must also deploy the private <code>drive-session</code> Supabase Edge Function. This is separate from the initial Google sign-in setup and GitHub Pages deployment.</p>
+<p>Note remembers a verified short-lived Drive connection across reloads. For automatic renewal after Google expires that access, the app owner must also deploy the private <code>drive-session</code> Supabase Edge Function. This is separate from the initial Google sign-in setup and GitHub Pages deployment. If this private function is already deployed, the v0.8.0 login change needs no redeployment or extra SQL.</p>
 <ol>
 <li>Run <a href="./enable-drive-refresh.sql">enable-drive-refresh.sql</a> in your Supabase SQL Editor.</li>
 <li>Follow the <a href="https://github.com/augustof2022/notes/blob/main/supabase/functions/drive-session/README.md" target="_blank" rel="noreferrer">private Drive renewal deployment guide</a> to set the four server-only secrets and deploy the function. Keep the Google secret and encryption key in Supabase Edge Function Secrets.</li>
