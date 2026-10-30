@@ -35,6 +35,7 @@ type EdgeData = DiagramEdgeData & { doubleLine?: boolean };
 const EPSILON = 0.01;
 const OUTLINE_INSET = 6;
 const attachmentGeometry = new WeakMap<object, string>();
+const editedAttachments = new WeakMap<object, ReadonlySet<'fromId' | 'toId'>>();
 
 function localPoints(points: readonly Point[]): ExcalidrawLinearElement['points'] {
   return points as unknown as ExcalidrawLinearElement['points'];
@@ -288,6 +289,8 @@ export function repairDiagramElements(elements: readonly ExcalidrawElement[], st
     if (data?.kind !== 'edge') continue;
     const points = worldPoints(element);
     const editor = [state?.editingLinearElement, state?.selectedLinearElement].find(editor => editor?.elementId === element.id);
+    const identity = element.customData!;
+    const editedEnds = new Set(editedAttachments.get(identity));
     const next = { ...data };
     const geometry: unknown[] = [];
     let metadataChanged = false;
@@ -303,6 +306,7 @@ export function repairDiagramElements(elements: readonly ExcalidrawElement[], st
       const selectedEndpoint = !!editor?.isDragging && (end.index === 0
         ? editor.pointerDownState?.lastClickedPoint === 0 || !!editor.selectedPointsIndices?.includes(0)
         : !!editor.pointerDownState?.lastClickedIsEndPoint || !!editor.selectedPointsIndices?.includes(end.index));
+      if (selectedEndpoint && data.universal) editedEnds.add(end.id);
       let target = (bound && connectionTarget(elements, bound.elementId, bound.elementId === data[end.id] ? data[end.group] : undefined)) || connectionTarget(elements, data[end.id], data[end.group]);
       if (selectedEndpoint && data.universal) {
         const hovered = connectionTargetAt(elements, points[end.index], 12);
@@ -311,7 +315,15 @@ export function repairDiagramElements(elements: readonly ExcalidrawElement[], st
           if (next[end.group] !== hovered.groupId || next[end.custom] !== !hovered.native) metadataChanged = true;
           next[end.group] = hovered.groupId; next[end.custom] = !hovered.native;
         } else {
-          next[end.anchor] = null; next[end.custom] = true; metadataChanged = true;
+          // onChange also runs while the pointer is held still. Detach once;
+          // reporting an unchanged null anchor as a repair schedules another
+          // render indefinitely and crashes the editor during endpoint drags.
+          if (next[end.anchor] !== null || next[end.custom] !== true) metadataChanged = true;
+          next[end.anchor] = null; next[end.custom] = true;
+          // Release the previous native binding as soon as the endpoint leaves
+          // its object. Keeping it during the drag makes the elbow router snap
+          // against an object the pointer has already left.
+          if (bound) { mutate(element, { [end.binding]: null }, false); changed = true; }
           continue;
         }
       }
@@ -327,7 +339,7 @@ export function repairDiagramElements(elements: readonly ExcalidrawElement[], st
       } else if (anchor === undefined || (anchor !== null && !isDiagramAnchor(anchor))) {
         // Preserve the saved geometry when upgrading an existing connector.
         anchor = fixed || (bound?.elementId === target.element.id ? pointAnchor(target.geometry, points[end.index]) : sideAnchor(data[end.side]));
-      } else if (!bound && !editor?.isDragging && !data[end.custom]) {
+      } else if (!bound && !editor?.isDragging && !data[end.custom] && !editedEnds.has(end.id)) {
         // A user can deliberately detach an endpoint. Do not snap it back.
         anchor = null;
       }
@@ -380,6 +392,11 @@ export function repairDiagramElements(elements: readonly ExcalidrawElement[], st
     }
     if (!editor?.isDragging && !elbowed && updateLineGeometry(element, points, mutate)) changed = true;
     if (metadataChanged) { mutate(element, { customData: { ...element.customData, noteDiagram: next } }, false); changed = true; }
+    // Elbow routes can change point count before pointerup, so the native
+    // editor may miss rebinding its old endpoint index. Keep the chosen anchor
+    // through that final frame, then let the normal binding repair attach it.
+    if (editor?.isDragging && editedEnds.size) editedAttachments.set(element.customData!, editedEnds);
+    else { editedAttachments.delete(identity); editedAttachments.delete(element.customData!); }
   }
   for (const element of elements) {
     if (element.isDeleted) continue;

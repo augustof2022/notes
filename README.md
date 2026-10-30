@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.11.0**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.11.1**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 

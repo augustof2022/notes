@@ -142,6 +142,56 @@ describe('persistent diagram attachments', () => {
     expect(end(edge)).toEqual(detached);
     expect(readDiagramData(edge)).toMatchObject({ toAnchor: null });
   });
+  it.each(['from', 'to'] as const)('settles while the %s endpoint is held in empty space', end => {
+    const { edge, elements } = fixture();
+    Object.assign(edge.customData.noteDiagram, { universal: true });
+    const index = end === 'from' ? 0 : edge.points.length - 1;
+    edge.points[index] = end === 'from' ? [-400, -300] : [800, 600];
+    const state = { selectedLinearElement: { elementId: edge.id, isDragging: true, selectedPointsIndices: [index],
+      pointerDownState: { lastClickedPoint: index, lastClickedIsEndPoint: end === 'to' } } } as unknown as AppState;
+    expect(repairDiagramElements(elements, state)).toBe(true);
+    expect(readDiagramData(edge)).toMatchObject({ [`${end}Anchor`]: null, [`${end}Custom`]: true });
+    expect(edge[end === 'from' ? 'startBinding' : 'endBinding']).toBeNull();
+    const settled = JSON.stringify(elements);
+    // Repeated onChange events during the same pointer hold must not schedule
+    // another scene update: React otherwise loops until the editor unmounts.
+    for (let frame = 0; frame < 5; frame++) expect(repairDiagramElements(elements, state)).toBe(false);
+    expect(JSON.stringify(elements)).toBe(settled);
+  });
+  it('settles again after bringing a detached endpoint back onto an object', () => {
+    const { edge, elements } = fixture();
+    Object.assign(edge.customData.noteDiagram, { universal: true, toAnchor: null, toCustom: true });
+    const state = { selectedLinearElement: { elementId: edge.id, isDragging: true, selectedPointsIndices: [1],
+      pointerDownState: { lastClickedPoint: 1, lastClickedIsEndPoint: true } } } as unknown as AppState;
+    expect(repairDiagramElements(elements, state)).toBe(true);
+    expect(readDiagramData(edge)).toMatchObject({ toAnchor: [0.25, 0], toCustom: false });
+    expect(repairDiagramElements(elements, state)).toBe(false);
+  });
+  it('finishes reattaching when the native editor loses its endpoint index after rerouting', () => {
+    const { b, edge, elements } = fixture();
+    Object.assign(edge.customData.noteDiagram, { universal: true });
+    const state = { selectedLinearElement: { elementId: edge.id, isDragging: true, selectedPointsIndices: [1],
+      pointerDownState: { lastClickedPoint: 1, lastClickedIsEndPoint: true } } } as unknown as AppState;
+    edge.points[1] = [800, 600];
+    repairDiagramElements(elements, state);
+    expect(edge.endBinding).toBeNull();
+    edge.points[1] = [300, 150]; // Return to 50% of the target's top edge.
+    repairDiagramElements(elements, state);
+    expect(readDiagramData(edge)).toMatchObject({ toAnchor: [0.5, 0], toCustom: false });
+    // Model a pointerup that misses the binding because the elbow's last point
+    // moved to another index. The last hovered attachment must still survive.
+    repairDiagramElements(elements);
+    expect(edge.endBinding).toMatchObject({ elementId: b.id });
+    expect(readDiagramData(edge)).toMatchObject({ toAnchor: [0.5, 0] });
+    b.x += 100;
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual([600, 200]);
+    expect(repairDiagramElements(elements)).toBe(false);
+    // A later deliberate detach must not resurrect the prior drag's binding.
+    edge.endBinding = null as any;
+    repairDiagramElements(elements);
+    expect(readDiagramData(edge)).toMatchObject({ toAnchor: null });
+  });
   it('uses the same attachment fraction after rotation and translation', () => {
     const shape = { x: 100, y: 80, width: 200, height: 100, angle: Math.PI / 2 };
     const point = anchorPoint(shape, [0.25, 0]);
