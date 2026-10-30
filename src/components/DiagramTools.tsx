@@ -1,32 +1,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { CaptureUpdateAction, mutateElement } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { Arrowhead, ExcalidrawArrowElement, ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { GitBranch, Link2, Plus, Shapes, SlidersHorizontal, Type } from 'lucide-react';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
-import { attachDiagramEdge, createDiagramEdge, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
+import { attachDiagramEdge, createDiagramEdge, createObjectConnection, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
+import { connectionPrimary, connectionTarget, connectionTargetAt, selectedConnectionTargets } from '../lib/connection-targets';
 import { diagramShortcutNode, diagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { richTextColor } from '../lib/rich-text';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
 import './diagram.css';
 
 function selectedDiagram(elements: readonly ExcalidrawElement[], state: AppState) {
-  const byId = new Map(elements.map(element => [element.id, element]));
+  const objects = selectedConnectionTargets(elements, state.selectedElementIds);
   const selected = new Map<string, ExcalidrawElement>();
   for (const element of elements) {
     if (element.isDeleted || element.locked || !state.selectedElementIds[element.id]) continue;
-    let primary = element;
-    if (element.type === 'text' && element.containerId) primary = byId.get(element.containerId) || element;
-    const data = readDiagramData(primary);
-    if (data?.kind === 'decoration') primary = byId.get(data.nodeId) || primary;
+    const primary = connectionPrimary(element, elements);
     if (primary.locked) continue;
     if (readDiagramData(primary)?.kind !== 'decoration' && readDiagramData(primary)) selected.set(primary.id, primary);
   }
   const only = selected.size === 1 ? [...selected.values()][0] : null;
+  const node = only && readDiagramData(only)?.kind === 'node' && objects.length === 1 && !objects[0].groupId ? only : null;
   return {
-    node: only && readDiagramData(only)?.kind === 'node' ? only : null,
-    edge: only?.type === 'arrow' && readDiagramData(only)?.kind === 'edge' ? only as ExcalidrawArrowElement : null,
+    node,
+    edge: !objects.length && only?.type === 'arrow' && readDiagramData(only)?.kind === 'edge' ? only as ExcalidrawArrowElement : null,
+    object: !node && objects.length === 1 && !elements.some(element => state.selectedElementIds[element.id] && readDiagramData(connectionPrimary(element, elements))?.kind === 'edge') ? objects[0] : null,
   };
 }
 function labelOf(elements: readonly ExcalidrawElement[], node: ExcalidrawElement) {
@@ -77,7 +77,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const activeDiagram = useRef<string | null>(existing?.diagramId || null);
   const [snapshot, setSnapshot] = useState<{ elements: readonly ExcalidrawElement[]; state: AppState; key: string }>(() => ({ elements: api.getSceneElements(), state: api.getAppState(), key: '' }));
   const selection = selectedDiagram(snapshot.elements, snapshot.state);
-  const chosen = selection.node || selection.edge;
+  const chosen = selection.node || selection.edge || selection.object?.element;
   const live = useRef({ enabled, panel, placing, sourceId, connection, system, presetId, baseStyle });
   live.current = { enabled, panel, placing, sourceId, connection, system, presetId, baseStyle };
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-diagrams"]') || null); }, [root]);
@@ -154,8 +154,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     }
     root?.dispatchEvent(new Event('note-rich-text-edit'));
   }
-  function commitAdded(added: ExcalidrawElement[], selectedId: string, edit = true) {
-    const elements = api.getSceneElementsIncludingDeleted();
+  function commitAdded(added: ExcalidrawElement[], selectedId: string, edit = true, base = api.getSceneElementsIncludingDeleted()) {
+    const elements = structuredClone(base);
     attachDiagramEdge(elements, added);
     flushSync(() => {
       setPanel(false); setPendingRelation(null); setPlacing(false); setSourceId(null); setPointer(null);
@@ -170,6 +170,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       if (left < 24 || top < 100 || left + node.width * zoom > state.width - 24 || top + node.height * zoom > state.height - 80) {
         flushSync(() => api.scrollToContent(node, { fitToContent: false, animate: false }));
       }
+      root?.dispatchEvent(new CustomEvent('note-diagram-node-created', { detail: { nodeId: node.id } }));
       editLabel(node, true);
     }
   }
@@ -238,7 +239,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     return () => document.removeEventListener('keydown', shortcut, true);
   }, [api, root]);
   function beginConnection() {
-    const node = selectedDiagram(api.getSceneElements(), api.getAppState()).node;
+    const selected = selectedDiagram(api.getSceneElements(), api.getAppState());
+    const node = selected.node || selected.object?.element;
     if (!node) return;
     root?.dispatchEvent(new Event('note:diagram-placement'));
     setPanel(false); setPlacing(false); setSourceId(node.id); setPointer(null);
@@ -262,18 +264,21 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     return () => root?.removeEventListener('note-board-tool-activate', beginStamping);
   }, [api, root]);
   function connectTo(target: ExcalidrawElement) {
-    const elements = api.getSceneElementsIncludingDeleted(), source = elements.find(element => element.id === live.current.sourceId);
+    const elements = structuredClone(api.getSceneElementsIncludingDeleted()), source = elements.find(element => element.id === live.current.sourceId);
     const sourceData = source && readDiagramData(source), targetData = readDiagramData(target);
-    if (!source || sourceData?.kind !== 'node' || targetData?.kind !== 'node') return;
+    if (!source) return;
+    const diagramConnection = sourceData?.kind === 'node' && targetData?.kind === 'node' && !connectionTarget(elements, source.id)?.groupId && !connectionTarget(elements, target.id)?.groupId;
     // Linking separate diagrams joins their theme scope without changing hierarchy.
-    if (targetData.diagramId !== sourceData.diagramId) for (const element of elements) {
+    if (diagramConnection && targetData.diagramId !== sourceData.diagramId) for (const element of elements) {
       const data = readDiagramData(element);
-      if (data?.diagramId === targetData.diagramId) mutateElement(element, { customData: { ...element.customData, noteDiagram: { ...data, diagramId: sourceData.diagramId } } });
+      if (data?.diagramId === targetData.diagramId) mutateElement(element, { customData: { ...element.customData, noteDiagram: { ...data, diagramId: sourceData.diagramId } } }, false);
     }
-    const added = createDiagramEdge(source, target, nativeSettings(live.current.connection), live.current.baseStyle);
+    const added = diagramConnection
+      ? createDiagramEdge(source, target, nativeSettings(live.current.connection), live.current.baseStyle)
+      : createObjectConnection(elements, source.id, target.id, nativeSettings(live.current.connection), live.current.baseStyle);
     const edge = added.find(element => element.type === 'arrow')!;
-    activeDiagram.current = sourceData.diagramId;
-    commitAdded(added, edge.id, false);
+    activeDiagram.current = sourceData?.kind === 'node' ? sourceData.diagramId : null;
+    commitAdded(added, edge.id, false, elements);
   }
   useEffect(() => {
     const cancelStampConflict = () => cancelOperation();
@@ -291,8 +296,9 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
         activeDiagram.current = diagramId;
         commitAdded(added, added.find(element => readDiagramData(element)?.kind === 'node')!.id);
       } else {
-        const target = getDiagramNodes(api.getSceneElements()).slice().reverse().find(node => x >= node.x && x <= node.x + node.width && y >= node.y && y <= node.y + node.height);
-        if (target) connectTo(target);
+        const target = connectionTargetAt(api.getSceneElements(), [x, y]);
+        const source = live.current.sourceId && connectionTarget(api.getSceneElements(), live.current.sourceId);
+        if (target && source && target.element.id !== source.element.id && !(source.groupId && source.groupId === target.groupId)) connectTo(target.element);
       }
     });
     const move = (event: PointerEvent) => { if (live.current.sourceId && root) { const bounds = root.getBoundingClientRect(); setPointer([event.clientX - bounds.left, event.clientY - bounds.top]); } };
@@ -303,7 +309,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
 
   function applyStyle(patch: Partial<DiagramStyle>) {
     setBaseStyle(previous => ({ ...previous, ...patch }));
-    const elements = api.getSceneElementsIncludingDeleted(), selected = selectedDiagram(elements, api.getAppState());
+    const elements = structuredClone(api.getSceneElementsIncludingDeleted()), selected = selectedDiagram(elements, api.getAppState());
     const primary = selected.node || selected.edge;
     if (!primary) return;
     for (const element of elements) {
@@ -321,19 +327,21 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (!edge || data?.kind !== 'edge') return;
     const from = elements.find(element => element.id === data.fromId), to = elements.find(element => element.id === data.toId);
     if (!from || !to) return;
-    const settings = { ...settingsOf(edge), ...patch }, fresh = createDiagramEdge(from, to, {
+    const settings = { ...settingsOf(edge), ...patch }, edgeSettings = {
       ...nativeSettings(settings), fromAnchor: patch.fromSide === undefined ? data.fromAnchor : undefined,
       toAnchor: patch.toSide === undefined ? data.toAnchor : undefined,
-    }, styleOf(edge));
+    };
+    const fresh = data.universal ? createObjectConnection(elements, from.id, to.id, edgeSettings, styleOf(edge)) : createDiagramEdge(from, to, edgeSettings, styleOf(edge));
     const replacement = fresh.find(element => element.type === 'arrow');
     if (!replacement || replacement.type !== 'arrow') return;
     const routeChanged = patch.route !== undefined || patch.fromSide !== undefined || patch.toSide !== undefined;
     const anchors = readDiagramData(replacement);
-    mutateElement(edge, { ...(routeChanged ? { x: replacement.x, y: replacement.y, width: replacement.width, height: replacement.height, points: replacement.points, startBinding: replacement.startBinding, endBinding: replacement.endBinding,
+    const updated = newElementWith(edge, { ...(routeChanged ? { x: replacement.x, y: replacement.y, width: replacement.width, height: replacement.height, points: replacement.points, startBinding: replacement.startBinding, endBinding: replacement.endBinding,
       elbowed: 'elbowed' in replacement && replacement.elbowed, roundness: replacement.roundness, fixedSegments: null } : {}), startArrowhead: replacement.startArrowhead, endArrowhead: replacement.endArrowhead,
       customData: { ...edge.customData, noteDiagram: { ...data, ...(routeChanged && anchors?.kind === 'edge' ? { fromAnchor: anchors.fromAnchor, toAnchor: anchors.toAnchor } : {}), fromSide: settings.fromSide, toSide: settings.toSide, doubleLine: settings.doubleLine } } });
+    elements[elements.indexOf(edge)] = updated;
     const decorations = elements.filter(element => { const item = readDiagramData(element); return !element.isDeleted && item?.kind === 'decoration' && item.nodeId === edge.id; });
-    if (!settings.doubleLine) for (const element of decorations) mutateElement(element, { isDeleted: true });
+    if (!settings.doubleLine) for (const element of decorations) elements[elements.indexOf(element)] = newElementWith(element, { isDeleted: true });
     if (settings.doubleLine && !decorations.length) {
       const decoration = fresh.find(element => readDiagramData(element)?.kind === 'decoration');
       if (decoration) { const item = readDiagramData(decoration)!; mutateElement(decoration, { customData: { ...decoration.customData, noteDiagram: { ...item, nodeId: edge.id } } }); elements.push(decoration); }
@@ -344,7 +352,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     const theme = DIAGRAM_THEMES.find(item => item.id === themeId);
     if (!theme) return;
     setBaseStyle(previous => ({ ...previous, fill: theme.fill, stroke: theme.stroke }));
-    const elements = api.getSceneElementsIncludingDeleted(), selected = selectedDiagram(elements, api.getAppState());
+    const elements = structuredClone(api.getSceneElementsIncludingDeleted()), selected = selectedDiagram(elements, api.getAppState());
     const identity = (selected.node || selected.edge) && readDiagramData((selected.node || selected.edge)!);
     const diagramId = identity?.diagramId || activeDiagram.current;
     if (!diagramId) { onMessage('Theme selected for new shapes.'); return; }
@@ -367,25 +375,27 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
 
   const bounds = root?.getBoundingClientRect();
   const project = (point: [number, number]): [number, number] => [(point[0] + snapshot.state.scrollX) * snapshot.state.zoom.value + snapshot.state.offsetLeft - (bounds?.left || 0), (point[1] + snapshot.state.scrollY) * snapshot.state.zoom.value + snapshot.state.offsetTop - (bounds?.top || 0)];
-  const nodeCenter = chosen && project([chosen.x + chosen.width / 2, chosen.y]);
+  const chosenGeometry = selection.object?.geometry || chosen;
+  const nodeCenter = chosenGeometry && project([chosenGeometry.x + chosenGeometry.width / 2, chosenGeometry.y]);
   const editorTop = (root?.querySelector('.excalidraw')?.getBoundingClientRect().top || bounds?.top || 0) - (bounds?.top || 0);
   const actionHeight = selection.node ? 102 : 52;
   const actionPosition = nodeCenter && { left: Math.max(8, Math.min((bounds?.width || 400) - 320, nodeCenter[0] - 152)), top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - actionHeight - 16, nodeCenter[1] - actionHeight - 8)) };
-  const source = sourceId && snapshot.elements.find(element => element.id === sourceId);
-  const start = source ? project(sidePoint(source, connection.fromSide)) : null;
+  const source = sourceId && connectionTarget(snapshot.elements, sourceId);
+  const start = source ? project(sidePoint(source.geometry, connection.fromSide)) : null;
   const selectedData = selection.node && readDiagramData(selection.node);
   const selectedStyle = chosen ? styleOf(chosen) : baseStyle;
   const selectedConnection = selection.edge ? settingsOf(selection.edge) : connection;
-  const showActions = enabled && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
+  const showActions = (enabled || selection.object || selection.edge?.customData?.noteDiagram?.universal) && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
   const actions = selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
+    : selection.object ? <button onClick={beginConnection}><Link2 size={14} />Add connection</button>
     : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>;
-  const actionLabel = selection.node ? 'Selected diagram shape actions' : 'Selected diagram connection actions';
+  const actionLabel = selection.node ? 'Selected diagram shape actions' : selection.object ? 'Selected object connections' : 'Selected diagram connection actions';
   return <>
     {host && createPortal(<button className="diagram-mode-button" aria-label="Diagrams" aria-pressed={enabled} onClick={() => { manuallyExited.current = false; setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} /><span>Diagrams</span></button>, host)}
     {showActions && (mobileActionSlot ? createPortal(<div className="diagram-inline-actions" role="group" aria-label={actionLabel}>{actions}</div>, mobileActionSlot)
       : actionPosition && snapshot.state.openMenu !== 'canvas' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={actionLabel}>{actions}</div>)}
     {(placing || sourceId) && <div className="diagram-operation" role="status" style={{ top: editorTop + 72 }}>
-      <span>{placing ? 'Tap the board to place your shape, then type.' : 'Tap a target shape to connect. Loops back to earlier shapes are allowed.'}</span>
+      <span>{placing ? 'Tap the board to place your shape, then type.' : 'Tap a board object to connect. Connections follow shapes, text, images, drawings, and groups.'}</span>
       {sourceId && <><label>From<select aria-label="Connection from side" value={connection.fromSide} onChange={event => setConnection(previous => ({ ...previous, fromSide: event.target.value as ConnectionSettings['fromSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label><label>To<select aria-label="Connection to side" value={connection.toSide} onChange={event => setConnection(previous => ({ ...previous, toSide: event.target.value as ConnectionSettings['toSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label></>}
       <button onClick={cancelOperation}>Cancel</button>
     </div>}

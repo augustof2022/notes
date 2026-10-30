@@ -118,14 +118,30 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const selectedPen = elements.find(x => x.type === 'freedraw' && !x.isDeleted && state.selectedElementIds[x.id]);
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
-    let repaired = repairDiagramElements(elements, state);
-    const rich = repairRichTextElements(elements, state.editingTextElement?.id);
+    const originals = new Map<ExcalidrawElement, ExcalidrawElement>();
+    const repairElement: typeof mutateElement = (element, updates, informMutation, options) => {
+      if (!originals.has(element)) originals.set(element, { ...element });
+      return mutateElement(element, updates, informMutation, options);
+    };
+    let repaired = repairDiagramElements(elements, state, repairElement);
+    const rich = repairRichTextElements(elements, state.editingTextElement?.id, repairElement);
     elements = rich.elements;
     repaired ||= rich.changed;
     for (const element of elements) {
       const updates = constantInkUpdates(element);
-      if (updates) { mutateElement(element, updates, false); repaired = true; }
+      if (updates) { repairElement(element, updates, false); repaired = true; }
     }
+    // Route arrows while their original objects still belong to the native
+    // scene, then submit replacements. Leaving repairs on the live objects
+    // makes the canvas defer them as unfinished user edits and later adds an
+    // invisible Undo step, such as a label's layout after creating a child.
+    elements = elements.map(element => {
+      const original = originals.get(element);
+      if (!original || original.version === element.version) return element;
+      const replacement = { ...element };
+      Object.assign(element, original);
+      return replacement;
+    });
     const correction = viewLockCorrection(state, viewLock.current);
     const tool = stickyTextTool(state.activeTool, previousTool.current);
     const selectedElementIds = { ...state.selectedElementIds };

@@ -31,12 +31,12 @@ export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: 
 }
 
 /** Runs in the canvas repair pass, including moves, rotation, resizing, undo, and reload. */
-export function repairRichTextElements(input: readonly ExcalidrawElement[], editingId?: string) {
+export function repairRichTextElements(input: readonly ExcalidrawElement[], editingId?: string, mutate = mutateElement) {
   const elements = [...input], files: BinaryFileData[] = [], byId = new Map(elements.map(element => [element.id, element]));
   const owners = new Set<string>(); let changed = false;
   function update(element: ExcalidrawElement, values: Record<string, any>) {
     if (Object.entries(values).every(([key, value]) => JSON.stringify((element as any)[key]) === JSON.stringify(value))) return;
-    mutateElement(element, values, false); changed = true;
+    mutate(element, values, false); changed = true;
   }
   for (const source of [...elements]) {
     if (source.type !== 'text' || source.isDeleted) continue;

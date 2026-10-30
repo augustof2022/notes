@@ -11,12 +11,18 @@ import type { DiagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { RichTextEditor } from './RichTextEditor';
 
 export interface RichTextHandle { flush(): void; finish(): void; draftElements(): ExcalidrawElement[] | null; hasDraft(): boolean }
-interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; applied: string; width: number }
+interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; applied: string; width: number; undoCreation: boolean }
 export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null }>(function RichTextTools({ api, root }, ref) {
   const [session, setSession] = useState<Session | null>(null), current = useRef<Session | null>(null);
   const [host, setHost] = useState<Element | null>(null);
   const [editorHeight, setEditorHeight] = useState(27), [, updateViewport] = useState('');
   const takingOver = useRef(false);
+  const createdNode = useRef<string | null>(null);
+  useEffect(() => {
+    const created = (event: Event) => { createdNode.current = (event as CustomEvent<{ nodeId: string }>).detail.nodeId; };
+    root?.addEventListener('note-diagram-node-created', created);
+    return () => root?.removeEventListener('note-diagram-node-created', created);
+  }, [root]);
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-text"]') || null); }, [root]);
   useLayoutEffect(() => {
     if (!root) return;
@@ -62,7 +68,8 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     const left = (originX + state.scrollX) * zoom;
     if (!base.containerId) width = Math.max(48, Math.min(width, (state.width - 16) / zoom, !data && base.autoResize ? (state.width - left - 16) / zoom : Infinity));
     const targetLeft = Math.max(8, Math.min(left, state.width - width * zoom - 8));
-    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', applied: data && deleted ? '' : JSON.stringify(doc), width };
+    const undoCreation = !!container && createdNode.current === container.id; createdNode.current = null;
+    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', applied: data && deleted ? '' : JSON.stringify(doc), width, undoCreation };
     current.current = next; setEditorHeight(base.height || base.fontSize * 1.35); setSession(next);
     api.updateScene({ appState: { editingTextElement: { ...base, isDeleted: false }, selectedElementIds: {}, selectedGroupIds: {}, openMenu: null, scrollX: state.scrollX + (targetLeft - left) / zoom }, captureUpdate: CaptureUpdateAction.NEVER });
   }
@@ -117,6 +124,17 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     const draft = draftScene(); if (!draft) return;
     api.updateScene({ elements: draft.elements, appState: { editingTextElement: draft.text.isDeleted ? null : { ...draft.text, isDeleted: false }, selectedElementIds: {}, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     draft.active.applied = draft.signature;
+    draft.active.undoCreation = false;
+  }
+  function undoCreation() {
+    if (!current.current?.undoCreation) return false;
+    flushSync(() => {
+      current.current = null; setSession(null);
+      api.updateScene({ appState: { editingTextElement: null }, captureUpdate: CaptureUpdateAction.NEVER });
+    });
+    const canvas = root?.querySelector<HTMLElement>('.excalidraw'); canvas?.focus();
+    canvas?.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+    return true;
   }
   useImperativeHandle(ref, () => ({ flush: saveDraft, finish: () => { if (current.current) finish(current.current.doc, undefined, false); }, draftElements: () => draftScene()?.elements || null, hasDraft: () => !!current.current }));
   function finish(doc: RichDoc, relation?: DiagramShortcutRelation, focusCanvas = true) {
@@ -182,6 +200,6 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     {session && createPortal(<RichTextEditor key={session.base.id} doc={session.doc} fontSize={session.base.fontSize} color={session.color} opacity={session.base.opacity / 100} textAlign={session.base.textAlign === 'center' ? 'center' : session.base.textAlign === 'right' ? 'right' : 'left'} diagram={session.diagram} selectAll={session.selectAll}
       position={{ left: state.offsetLeft + (x + state.scrollX) * state.zoom.value, top: state.offsetTop + (y + state.scrollY) * state.zoom.value }} width={session.width} zoom={state.zoom.value} angle={parent && parent.type !== 'arrow' ? parent.angle : session.base.angle} minHeight={session.base.fontSize * 1.35}
       boardBounds={{ left: state.offsetLeft, top: state.offsetTop, right: state.offsetLeft + state.width, bottom: state.offsetTop + state.height }} onCaretPan={(dx, dy) => { const currentState = api.getAppState(); api.updateScene({ appState: { scrollX: currentState.scrollX + dx / currentState.zoom.value, scrollY: currentState.scrollY + dy / currentState.zoom.value }, captureUpdate: CaptureUpdateAction.NEVER }); }}
-      onHeight={setEditorHeight} onDraft={doc => { if (current.current) { current.current.doc = doc; root?.dispatchEvent(new Event('note-rich-text-change')); } }} onApply={finish} />, document.body)}
+      undoCreation={session.undoCreation} onUndoCreation={undoCreation} onHeight={setEditorHeight} onDraft={doc => { if (current.current) { current.current.doc = doc; root?.dispatchEvent(new Event('note-rich-text-change')); } }} onApply={finish} />, document.body)}
   </>;
 });

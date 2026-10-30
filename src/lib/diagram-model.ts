@@ -95,6 +95,11 @@ export interface DiagramEdgeData extends DiagramIdentity {
   toSide: DiagramSide;
   fromAnchor?: DiagramAnchor | null;
   toAnchor?: DiagramAnchor | null;
+  universal?: boolean;
+  fromGroup?: string;
+  toGroup?: string;
+  fromCustom?: boolean;
+  toCustom?: boolean;
 }
 
 export interface DiagramDecorationData extends DiagramIdentity {

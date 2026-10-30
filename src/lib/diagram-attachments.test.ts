@@ -7,6 +7,7 @@ vi.mock('@excalidraw/excalidraw', () => ({
   mutateElement: (element: object, patch: object) => Object.assign(element, patch),
   newElementWith: (element: object, patch: object) => ({ ...element, ...patch }),
   convertToExcalidrawElements: vi.fn(),
+  getCommonBounds: (elements: any[]) => [Math.min(...elements.map(e => e.x)), Math.min(...elements.map(e => e.y)), Math.max(...elements.map(e => e.x + e.width)), Math.max(...elements.map(e => e.y + e.height))],
 }));
 import { repairDiagramElements } from './diagram-scene';
 
@@ -71,12 +72,28 @@ describe('persistent diagram attachments', () => {
     const { b, edge, elements } = fixture();
     edge.elbowed = true;
     edge.endBinding = { ...edge.endBinding, fixedPoint: [0.75, 0] } as any;
-    repairDiagramElements(elements);
+    edge.points[1] = [350, 150];
+    repairDiagramElements(elements, { selectedLinearElement: { elementId: 'edge', isDragging: true, selectedPointsIndices: [1] } } as unknown as AppState);
     expect(readDiagramData(edge)).toMatchObject({ toSide: 'top', toAnchor: [0.75, 0] });
     b.y += 100;
     repairDiagramElements(elements);
     expect(edge.endBinding).toMatchObject({ fixedPoint: [0.75, 0] });
     expect(readDiagramData(edge)).toMatchObject({ toAnchor: [0.75, 0] });
+  });
+  it('tracks the child endpoint when elbow routing changes its selected point index', () => {
+    const { b, edge, elements } = fixture();
+    edge.elbowed = true;
+    edge.endBinding = { ...edge.endBinding, fixedPoint: [0.25, 0] } as any;
+    edge.points = [[0, 0], [0, 75], [160, 75], [160, 200], [200, 200]];
+    repairDiagramElements(elements, { selectedLinearElement: { elementId: 'edge', isDragging: true, selectedPointsIndices: [1], pointerDownState: { lastClickedPoint: 1, lastClickedIsEndPoint: true } } } as unknown as AppState);
+    expect(readDiagramData(edge)).toMatchObject({ toSide: 'left', toAnchor: [0, 0.5] });
+    repairDiagramElements(elements);
+    expect(edge.endBinding).toMatchObject({ fixedPoint: [0, 0.5001] });
+    b.x += 300; b.y -= 150;
+    edge.endBinding = { ...edge.endBinding, fixedPoint: [0.5, 0] } as any;
+    repairDiagramElements(elements);
+    expect(readDiagramData(edge)).toMatchObject({ toSide: 'left', toAnchor: [0, 0.5] });
+    expect(edge.endBinding).toMatchObject({ fixedPoint: [0, 0.5001] });
   });
   it('rebinds to another diagram node without keeping the old node identity', () => {
     const { edge, elements } = fixture();
@@ -85,6 +102,45 @@ describe('persistent diagram attachments', () => {
     const editor = { elementId: 'edge', selectedPointsIndices: [1], isDragging: true };
     repairDiagramElements(elements, { editingLinearElement: editor, selectedLinearElement: null } as unknown as AppState);
     expect(readDiagramData(edge)).toMatchObject({ toId: 'a', toSide: 'top', toAnchor: [0.25, 0] });
+  });
+  it('follows ordinary text without converting it into a diagram node', () => {
+    const { b, edge, elements } = fixture();
+    Object.assign(b, { type: 'text', customData: undefined });
+    Object.assign(edge.customData.noteDiagram, { universal: true });
+    b.x += 150; b.y += 80; b.width = 400;
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual([650, 280]);
+    expect(readDiagramData(b)).toBeNull();
+  });
+  it('anchors to the entire icon group after moving and resizing its members', () => {
+    const { b, edge, elements } = fixture();
+    Object.assign(b, { type: 'line', groupIds: ['stamp'], customData: undefined });
+    const second = { ...b, id: 'stamp-handle', x: 620, width: 80, height: 120 };
+    elements.splice(2, 0, second as unknown as ExcalidrawElement);
+    edge.endBinding = null as any;
+    Object.assign(edge.customData.noteDiagram, { universal: true, toCustom: true, toGroup: 'stamp', toSide: 'left', toAnchor: [0, 0.5] });
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual([400, 260]);
+    b.x += 100; b.y += 80; second.x += 180; second.y += 80;
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual([500, 340]);
+    // A saved group link still resolves if its representative is deleted.
+    b.isDeleted = true;
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual([800, 340]);
+  });
+  it('leaves an object connection free after dragging its endpoint off the board objects', () => {
+    const { b, edge, elements } = fixture();
+    Object.assign(edge.customData.noteDiagram, { universal: true });
+    edge.points[1] = [800, 600];
+    repairDiagramElements(elements, { selectedLinearElement: { elementId: 'edge', isDragging: true, selectedPointsIndices: [1], pointerDownState: { lastClickedPoint: 1, lastClickedIsEndPoint: true } } } as unknown as AppState);
+    repairDiagramElements(elements);
+    expect(edge.endBinding).toBeNull();
+    const detached = end(edge);
+    b.x += 300; b.y += 200;
+    repairDiagramElements(elements);
+    expect(end(edge)).toEqual(detached);
+    expect(readDiagramData(edge)).toMatchObject({ toAnchor: null });
   });
   it('uses the same attachment fraction after rotation and translation', () => {
     const shape = { x: 100, y: 80, width: 200, height: 100, angle: Math.PI / 2 };

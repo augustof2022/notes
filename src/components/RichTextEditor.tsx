@@ -8,21 +8,23 @@ import { slashMatch, textCommands, textPopupPosition, type SlashMatch, type Text
 import './rich-text.css';
 
 type Popup = { left: number; top: number };
-export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, selectAll, position, width, zoom, angle, minHeight, boardBounds, onApply, onDraft, onHeight, onCaretPan }: {
+export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
   doc: RichDoc; fontSize: number; color: string; textAlign: 'left' | 'center' | 'right'; diagram: boolean; selectAll: boolean;
   position: Popup; width: number; zoom: number; angle: number; minHeight: number; opacity: number;
   boardBounds: { left: number; top: number; right: number; bottom: number }; onCaretPan: (dx: number, dy: number) => void;
+  undoCreation: boolean; onUndoCreation: () => boolean;
   onApply: (doc: RichDoc, relation?: DiagramShortcutRelation, focusCanvas?: boolean) => void; onDraft: (doc: RichDoc) => void; onHeight: (height: number) => void;
 }) {
   const surface = useRef<HTMLDivElement>(null), editorRef = useRef<ReturnType<typeof useEditor>>(null);
   const draft = useRef(doc), pasteMode = useRef({ raw: false, at: 0 }), dismissed = useRef<number | null>(null);
+  const initialDoc = useRef(JSON.stringify(cleanRichDoc(doc)));
   const [slash, setSlash] = useState<SlashMatch | null>(null), slashRef = useRef<SlashMatch | null>(null);
   const [active, setActive] = useState(0), activeRef = useRef(0);
   const [menuPosition, setMenuPosition] = useState<Popup>({ left: 8, top: 8 }), [barPosition, setBarPosition] = useState<Popup | null>(null);
   const [link, setLink] = useState<string | null>(null), linkRef = useRef<string | null>(null), [linkError, setLinkError] = useState('');
   const [, refresh] = useState(0);
   const panPending = useRef(false);
-  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds };
+  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation };
   const finish = (relation?: DiagramShortcutRelation, focusCanvas = true) => latest.current.onApply(cleanRichDoc(draft.current), relation, focusCanvas);
   const viewport = () => ({ width: window.visualViewport?.width || innerWidth, height: window.visualViewport?.height || innerHeight, left: window.visualViewport?.offsetLeft || 0, top: window.visualViewport?.offsetTop || 0 });
   function updateControls() {
@@ -74,6 +76,13 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
       attributes: { class: 'note-rich-content', role: 'textbox', 'aria-label': diagram ? 'Diagram text' : 'Text content', 'aria-multiline': 'true', spellcheck: 'true', 'data-placeholder': 'Type / for commands' },
       handleKeyDown: (_view, event) => {
         if (event.isComposing || event.keyCode === 229) return false;
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+          const current = editorRef.current;
+          if (!event.shiftKey && latest.current.undoCreation && current && !current.can().undo() && JSON.stringify(cleanRichDoc(current.getJSON())) === initialDoc.current && latest.current.onUndoCreation()) {
+            event.preventDefault(); event.stopPropagation(); return true;
+          }
+          event.preventDefault(); if (event.shiftKey) current?.commands.redo(); else current?.commands.undo(); return true;
+        }
         if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
           event.preventDefault(); editorRef.current?.commands.selectAll(); return true;
         }
