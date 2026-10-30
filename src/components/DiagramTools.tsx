@@ -7,6 +7,7 @@ import { GitBranch, Link2, Plus, Shapes, SlidersHorizontal, Type } from 'lucide-
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
 import { attachDiagramEdge, createDiagramEdge, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
 import { diagramShortcutNode, diagramShortcutRelation } from '../lib/diagram-shortcuts';
+import { richTextColor } from '../lib/rich-text';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
 import './diagram.css';
 
@@ -151,6 +152,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       input?.focus();
       input?.select();
     }
+    root?.dispatchEvent(new Event('note-rich-text-edit'));
   }
   function commitAdded(added: ExcalidrawElement[], selectedId: string, edit = true) {
     const elements = api.getSceneElementsIncludingDeleted();
@@ -182,7 +184,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       : palette.presets.find(item => item.id === live.current.presetId) || sourcePreset;
     const position = nextNodePosition(getDiagramNodes(elements), node, relation, preset);
     const label = elements.find(element => !element.isDeleted && element.type === 'text' && element.containerId === node.id);
-    const added = createDiagramNode(preset, position, data.diagramId, styleOf(node), label?.strokeColor);
+    const added = createDiagramNode(preset, position, data.diagramId, styleOf(node), label ? richTextColor(label) : undefined);
     const child = added.find(element => readDiagramData(element)?.kind === 'node')!;
     if (matchSelected) for (const element of added) {
       if (element.type === 'text' && label?.type === 'text') mutateElement(element, {

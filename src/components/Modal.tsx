@@ -1,15 +1,15 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
-export function Modal({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+export function Modal({ title, children, onClose, wide = false, initialFocus }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; initialFocus?: string }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const first = root.current?.querySelector<HTMLElement>('input, select, textarea, button:not(.close-button)');
+    const first = root.current?.querySelector<HTMLElement>(initialFocus || 'input, select, textarea, button:not(.close-button)');
     first?.focus();
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); }
       if (event.key !== 'Tab') return;
-      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, textarea, a[href], summary') || []).filter(x => x.offsetParent !== null);
+      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, [contenteditable="true"], a[href], summary') || []).filter(x => x.offsetParent !== null);
       if (!items.length) return;
       const index = items.indexOf(document.activeElement as HTMLElement);
       if (event.shiftKey && index <= 0) { event.preventDefault(); items.at(-1)?.focus(); }

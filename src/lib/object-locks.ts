@@ -9,7 +9,7 @@ export function lockedObjects(elements: readonly ExcalidrawElement[]): LockedObj
   const byId = new Map(visible.map(element => [element.id, element]));
   const groups = new Map<string, { owner: ExcalidrawElement; ids: string[] }>();
   for (const element of visible) {
-    if (!element.locked) continue;
+    if (!element.locked || element.customData?.noteRichTextRender) continue;
     const meta = readDiagramData(element);
     const ownerId = element.type === 'text' && element.containerId ? element.containerId : meta?.kind === 'decoration' ? meta.nodeId : element.id;
     const owner = byId.get(ownerId) || element;

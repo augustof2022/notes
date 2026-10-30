@@ -4,11 +4,12 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import { db } from './db';
 import { downloadAsset } from './sync';
 import { recordKey } from '../types';
+import { isRichTextFile } from './rich-text';
 
 export interface ImageLoadIssue { id: string; reason: string; reconnect: boolean }
 export interface BoardImageState { boardKey: string; total: number; loaded: number; loading: boolean; issues: ImageLoadIssue[] }
 export function boardImageIds(elements: readonly ExcalidrawElement[]) {
-  return [...new Set(elements.flatMap(element => element.type === 'image' && !element.isDeleted && element.fileId ? [element.fileId] : []))].sort();
+  return [...new Set(elements.flatMap(element => element.type === 'image' && !element.isDeleted && element.fileId && !isRichTextFile(element.fileId) ? [element.fileId] : []))].sort();
 }
 export function imageLoadLabel(state: BoardImageState) {
   if (state.loading) return `Loading images · ${state.loaded} of ${state.total}`;

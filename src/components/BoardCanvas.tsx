@@ -16,6 +16,9 @@ import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
 import { StampTools } from './StampTools';
 import { WritingTools } from './WritingTools';
+import { RichTextTools, type RichTextHandle } from './RichTextTools';
+import { applyRichText, repairRichTextElements } from '../lib/rich-text-scene';
+import { clipboardRichDoc, richDocText } from '../lib/rich-text';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
@@ -46,6 +49,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const chrome = useRef<BoardChromeHandle>(null);
+  const richText = useRef<RichTextHandle>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
   const [snapping, setSnapping] = useState(() => restoreSnapping(board.appState));
@@ -70,7 +74,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const reloadImages = useBoardImages(api, ready, board.key, board.scope, client, onImageState);
   // Open text and cached images immediately; remote files arrive progressively.
   const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => localSceneFiles(board.scope, boardImageIds(board.elements)).then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
-  async function flush() {
+  async function flush(includeTextDraft = true) {
+    if (includeTextDraft) richText.current?.flush();
     if (timer.current) clearTimeout(timer.current);
     const snapshot = pending.current; pending.current = null;
     if (snapshot) {
@@ -82,7 +87,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
           const current = await db.boards.get(board.key);
           if (!current || current.purged) return;
           const scene = { elements: snapshot.elements, appState: snapshot.state,
-            assetIds: [...new Set(snapshot.elements.filter(x => x.type === 'image' && !x.isDeleted).map(x => x.type === 'image' ? x.fileId : null).filter((x): x is NonNullable<typeof x> => !!x))] };
+            assetIds: boardImageIds(snapshot.elements) };
           const anchor = saveAnchor.current;
           const next = reconcileCanvasSave(anchor, scene, current);
           edited = boardContentChanged(current, next);
@@ -103,16 +108,31 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
     let repaired = repairDiagramElements(elements, state);
+    const rich = repairRichTextElements(elements);
+    elements = rich.elements;
+    repaired ||= rich.changed;
     for (const element of elements) {
       const updates = constantInkUpdates(element);
       if (updates) { mutateElement(element, updates, false); repaired = true; }
     }
     const correction = viewLockCorrection(state, viewLock.current);
     const tool = stickyTextTool(state.activeTool, previousTool.current);
+    const selectedElementIds = { ...state.selectedElementIds };
+    const byId = new Map(elements.map(element => [element.id, element]));
+    // Include derived text in the native selection export, while ordinary
+    // selection continues to target the editable text or its diagram shape.
+    for (const element of elements) if (element.customData?.noteRichTextRender) {
+      const source = byId.get(element.customData.noteRichTextRender.ownerId);
+      const include = state.openDialog?.name === 'imageExport' && source && (selectedElementIds[source.id] || (source.type === 'text' && source.containerId && selectedElementIds[source.containerId]) || (source.frameId && selectedElementIds[source.frameId]));
+      if (include && !element.isDeleted) selectedElementIds[element.id] = true; else delete selectedElementIds[element.id];
+    }
+    const selectionChanged = JSON.stringify(selectedElementIds) !== JSON.stringify(state.selectedElementIds);
     previousTool.current = state.activeTool.type;
     correcting.current = true;
     try {
-      if (api && (repaired || correction)) api.updateScene({ elements, ...(correction ? { appState: correction } : {}), captureUpdate: CaptureUpdateAction.NEVER });
+      const missing = api && rich.files.filter(file => !api.getFiles()[file.id]);
+      if (api && (repaired || correction || selectionChanged)) api.updateScene({ elements, appState: { zoom: correction?.zoom || state.zoom, selectedElementIds }, captureUpdate: CaptureUpdateAction.NEVER });
+      if (api && missing?.length) api.addFiles(missing);
       if (api && tool) api.setActiveTool(tool);
     } finally { correcting.current = false; }
     const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean);
@@ -123,7 +143,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     // Copy now: canvas file maps and app state can mutate during a delayed save.
     pending.current = { elements: structuredClone(elements), state: structuredClone(clean), files: { ...files } };
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { void flush().catch(() => {}); }, 300);
+    timer.current = setTimeout(() => { void flush(false).catch(() => {}); }, 300);
   }
   function jumpTo(elementId: string) {
     if (!api) return;
@@ -148,7 +168,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   function hasPendingChanges(key: string) {
     if (key !== board.key) return false;
     const state = api?.getAppState();
-    return !booted.current || !!pending.current || savesInFlight.current > 0 || !!state?.editingTextElement || state?.cursorButton === 'down' || !!state?.isResizing;
+    return !booted.current || !!pending.current || savesInFlight.current > 0 || !!richText.current?.hasDraft() || !!state?.editingTextElement || state?.cursorButton === 'down' || !!state?.isResizing;
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo, hasPendingChanges,
     toggleControls: () => chrome.current?.toggle(),
@@ -162,14 +182,17 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   }), [api, settings.theme]);
   useEffect(() => {
     const flushOnHide = () => { if (document.visibilityState === 'hidden') void flush().catch(() => {}); };
-    const beforeUnload = (event: BeforeUnloadEvent) => { if (pending.current) { event.preventDefault(); void flush().catch(() => {}); } };
+    const beforeUnload = (event: BeforeUnloadEvent) => { if (pending.current || richText.current?.hasDraft()) { event.preventDefault(); void flush().catch(() => {}); } };
     document.addEventListener('visibilitychange', flushOnHide); window.addEventListener('beforeunload', beforeUnload);
     return () => { document.removeEventListener('visibilitychange', flushOnHide); window.removeEventListener('beforeunload', beforeUnload); void flush().catch(() => {}); };
   }, []);
   useEffect(() => { if (api && jumpId) jumpTo(jumpId); }, [api, jumpId]);
   useEffect(() => {
     if (!api) return;
+    let pasteMode = { raw: false, at: 0 };
+    const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') pasteMode = { raw: event.shiftKey, at: Date.now() }; };
     const paste = (event: ClipboardEvent) => {
+      const raw = pasteMode.raw && Date.now() - pasteMode.at < 2000; pasteMode = { raw: false, at: 0 };
       const target = document.activeElement;
       if (document.querySelector('.modal-backdrop') || target?.closest('input, textarea, [contenteditable="true"]')) return;
       if (!booted.current) { event.preventDefault(); event.stopImmediatePropagation(); return; }
@@ -194,12 +217,19 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
             api.addFiles([{ id, dataURL, mimeType: image.type, created: Date.now() } as BinaryFileData]);
             added.push(...convertToExcalidrawElements([{ type: 'image', x: x - width / 2 + index * 25, y: y - height / 2 + index * 25, width, height, fileId: id, status: 'saved', scale: [1, 1] }]));
           }
-        } else added.push(...convertToExcalidrawElements([{ type: 'text', text, x: x - 140, y: y - 30, fontSize: 20, fontFamily: 2, width: 300 }]));
+        } else {
+          const doc = clipboardRichDoc(text, raw);
+          const created = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: x - 150, y: y - 30, fontSize: 20, fontFamily: 2, width: 300 }]);
+          const source = created.find(element => element.type === 'text');
+          if (source?.type === 'text') applyRichText(source, doc, state.currentItemStrokeColor);
+          added.push(...created);
+        }
         api.updateScene({ elements: [...api.getSceneElements(), ...added], appState: { selectedElementIds: Object.fromEntries(added.map(element => [element.id, true])) }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
       })().catch(error => onMessage(`Could not paste: ${error instanceof Error ? error.message : 'unsupported clipboard image'}`));
     };
     document.addEventListener('paste', paste, true);
-    return () => document.removeEventListener('paste', paste, true);
+    document.addEventListener('keydown', key, true);
+    return () => { document.removeEventListener('paste', paste, true); document.removeEventListener('keydown', key, true); };
   }, [api]);
   useEffect(() => {
     if (!api || hasPendingChanges(board.key)) return;
@@ -225,7 +255,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
     {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
-      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' },
+      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'text', title: 'Text and formatting' },
       { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
         setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
@@ -241,6 +271,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <RichTextTools ref={richText} api={api} root={canvasRoot} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;

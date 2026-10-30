@@ -3,6 +3,7 @@ import { CaptureUpdateAction, exportToCanvas, newElementWith } from '@excalidraw
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Modal } from './Modal';
+import { boardImageIds } from '../lib/board-images';
 import { db } from '../lib/db';
 import { downloadAsset } from '../lib/sync';
 import { queueOcr } from '../lib/ocr';
@@ -20,7 +21,7 @@ export function ReadTextDialog({ api, board, client, onClose, onMessage }: { api
   async function readImages() {
     setBusy(true); setStatus('Reading image text…');
     try {
-      const ids = [...new Set(api.getSceneElements().flatMap(x => x.type === 'image' && !x.isDeleted && x.fileId ? [x.fileId] : []))];
+      const ids = boardImageIds(api.getSceneElements());
       if (!ids.length) { setStatus('This board has no images to read.'); return; }
       // Flush is performed before opening this dialog, including newly pasted files.
       for (const id of ids) {

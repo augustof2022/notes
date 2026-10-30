@@ -4,7 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Asset } from '../types';
 import { db } from './db';
 import { downloadAsset } from './sync';
-import { loadBoardImages, type BoardImageState } from './board-images';
+import { boardImageIds, loadBoardImages, type BoardImageState } from './board-images';
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 const driveDownload = vi.hoisted(() => vi.fn());
 vi.mock('./drive', () => ({ downloadDriveImage: driveDownload, uploadDriveImage: vi.fn() }));
 vi.mock('./assets', async importOriginal => ({ ...await importOriginal<typeof import('./assets')>(), blobToDataURL: async (blob: Blob) => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString('base64')}` }));
@@ -12,6 +13,13 @@ const image = new Blob(['image bytes'], { type: 'image/png' });
 const cached = 'data:image/png;base64,Y2FjaGVk';
 const asset = (id: string, patch: Partial<Asset> = {}): Asset => ({ key: `owner:${id}`, scope: 'owner', id, created: 1, mimeType: 'image/png', storage: 'supabase', remotePath: `owner/${id}`, dirty: false, metadataSaved: true, ocrText: '', ocrStatus: 'done', ...patch });
 const cloud = (download = vi.fn().mockResolvedValue({ data: image, error: null })) => ({ client: { storage: { from: () => ({ download }) } } as unknown as SupabaseClient, download });
+it('loads user images without treating derived rich text as an uploaded asset', () => {
+  const elements = [
+    { type: 'image', fileId: 'screenshot' }, { type: 'image', fileId: 'note-rich-text-render' },
+    { type: 'image', fileId: 'screenshot' }, { type: 'image', fileId: 'deleted', isDeleted: true }, { type: 'text' },
+  ] as ExcalidrawElement[];
+  expect(boardImageIds(elements)).toEqual(['screenshot']);
+});
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => { driveDownload.mockReset(); vi.stubGlobal('navigator', { onLine: true }); });
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllGlobals(); await db.assets.clear(); });

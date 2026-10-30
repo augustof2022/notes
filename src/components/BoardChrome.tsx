@@ -8,7 +8,7 @@ import './board-chrome.css';
 export interface BoardChromeHandle { open: () => void; toggle: () => void }
 
 const groups: { key: BoardChromeGroup; title: string; description: string }[] = [
-  { key: 'actions', title: 'Board actions', description: 'Zoom lock, read text, diagrams, snapping, icon stamps, and writing tools.' },
+  { key: 'actions', title: 'Board actions', description: 'Zoom lock, read text, formatting, diagrams, snapping, icon stamps, and writing tools.' },
   { key: 'drawing', title: 'Drawing tools', description: 'Select, draw, add text and images, and choose shapes. Includes pan and tool lock on desktop.' },
   { key: 'navigation', title: 'Navigation tools', description: 'Library and zoom controls. Includes pan and tool lock on smaller screens.' },
   { key: 'editing', title: 'Editing tools', description: 'Object properties, board menus, and undo and redo.' },

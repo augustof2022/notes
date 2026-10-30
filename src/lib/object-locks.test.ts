@@ -24,3 +24,12 @@ it('keeps unrelated locks independent and ignores unlocked objects', () => {
   ] as unknown as ExcalidrawElement[];
   expect(lockedObjects(elements).map(item => item.elementIds)).toEqual([['one'], ['two']]);
 });
+
+it('does not offer to unlock the derived rendering of editable rich text', () => {
+  const elements = [
+    { id: 'text', type: 'text', text: 'Formatted', groupIds: [], locked: false },
+    { id: 'render', type: 'image', groupIds: [], locked: true, customData: { noteRichTextRender: { ownerId: 'text' } } },
+    { id: 'real-image', type: 'image', groupIds: [], locked: true },
+  ] as unknown as ExcalidrawElement[];
+  expect(lockedObjects(elements)).toEqual([{ id: 'real-image', label: 'Image', elementIds: ['real-image'] }]);
+});

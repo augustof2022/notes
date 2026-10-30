@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.8.0**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.10.0**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
@@ -45,7 +45,7 @@ The postinstall script copies fonts, OCR assets, the handwriting WASM runtime, a
 
 ## Build a diagram
 
-1. Open a board and choose **Diagrams**. Select a diagram system and a shape, then choose **Add** and tap the board to place it. Text editing opens immediately; type the label and click outside or press Escape to finish. Table names and column/key lists are editable text.
+1. Open a board and choose **Diagrams**. Select a diagram system and a shape, then choose **Add** and tap the board to place it. The text editor opens immediately; type and format the label, then choose **Done**, Ctrl+Enter, or Escape to save it. Table names and column/key lists are editable text.
 2. Select a diagram shape to show its four quick actions, including when reopening a saved board. Choosing Exit diagram mode disables these actions until you open Diagrams again. **Add child** creates a connected node below that shape. **Add sibling** creates another node beside it with the same parent; its connection goes to that shared parent. Adding a sibling to a root creates another root. New nodes avoid existing diagram shapes, and the view pans to keep a new node visible.
    Press **Tab** for a child or **Shift+Tab** for a sibling, either with a diagram shape selected on the canvas or while typing its label. The shortcut saves the current label, copies that shape’s preset, size, and style, and opens the new label for typing without asking you to choose a shape. Normal Tab navigation still works in menus, dialogs, and other inputs.
 3. **Edit shape** opens the palette for a selected node. Pick a shape from the same diagram system and choose **Apply … to selected shape** to keep the node’s text, colors, hierarchy, and connections. **Add child** and **Add sibling** first offer that system’s shapes when more than one is available, then add the chosen shape. Systems with one shape add it directly. **Add new …** places a separate diagram. Canvas object menus are hidden while the palette is open, including on mobile. Diagram actions remain available inside the built-in mobile Edit panel while it is open and float beside the selection when it closes. Desktop actions remain visible when the editor retains a shape-menu flag without showing a covering mobile panel.
@@ -58,6 +58,19 @@ Drag a connector endpoint to choose its attachment point. That point stays with 
 When objects are locked, the board controls show **Unlock objects**. Open it to unlock an individual object/group or use **Unlock all objects**. A diagram shape’s locked label and outline unlock with it. You can undo an unlock.
 
 Shapes, text, hierarchy, and connection settings autosave with the board and are included in sync and backups. These are visual diagram templates; there is no database schema generation or strict notation validation.
+
+## Format text and paste Markdown
+
+Press **T** and tap the board, double-click existing text, or edit a diagram label to open the visual text editor. **Format text** in Board actions (or **⋮ More** on a narrow toolbar) also formats selected text or adds a label to a selected shape. Existing plain text remains editable.
+
+Select words and apply bold, italic, underline, strikethrough, text/highlight colors, font family, or font size. The toolbar also offers headings, bulleted/numbered/check lists, quotes, inline/fenced code, links, and tables. Undo and redo inside the editor affect text edits; board Undo works after saving.
+
+- **Ctrl+V** interprets Markdown, both directly on the board and inside the text editor. Normal copied web content can retain its formatting.
+- **Ctrl+Shift+V** inserts literal text, including the Markdown characters. Use Cmd on Mac.
+- **Visual / Markdown** switches between the formatted document and editable Markdown source. **Copy Markdown** copies the source for use elsewhere.
+- **Done**, **Ctrl+Enter**, Escape, or closing the editor saves the text. In a diagram label, **Tab** saves and creates a matching child; **Shift+Tab** creates a matching sibling. Toolbar controls keep normal keyboard navigation. Save + child/sibling buttons offer the same commands on touch screens.
+
+Rich text stays searchable, moves/resizes/rotates with its object, and retains its formatting after reload, sync, backups, and PNG export. Its canvas rendering is generated locally from the stored document and does not create Drive uploads or OCR jobs. Common Markdown and GFM are supported; Markdown images stay as literal source, and embedded scripts are never rendered as active content. Copy Markdown may use inline HTML for styles Markdown cannot express, such as underline or colors.
 
 ## Icon stamps
 
@@ -144,7 +157,10 @@ GitHub Free requires a public repository for Pages; a private repository require
 | New folder | Ctrl+Alt+Shift+N |
 | Save / sync | Ctrl+S |
 | Rename open board | F2 |
-| Paste image / text | Ctrl+V |
+| Paste image / formatted Markdown | Ctrl+V |
+| Paste literal text / Markdown | Ctrl+Shift+V |
+| Bold / italic / underline while editing | Ctrl+B / Ctrl+I / Ctrl+U |
+| Save text edit | Ctrl+Enter |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
 | Duplicate selected object | Ctrl+D |
 | Add diagram child | Tab |

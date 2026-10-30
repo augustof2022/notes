@@ -3,6 +3,7 @@ import { db } from './db';
 import type { Asset } from '../types';
 import { recordKey } from '../types';
 import { isIconStampFile } from './icon-stamps';
+import { isRichTextFile } from './rich-text';
 
 export async function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = () => reject(new Error('Could not read image.')); reader.readAsDataURL(blob); });
@@ -20,6 +21,7 @@ async function compactImage(dataURL: string) {
 export async function storeSceneFiles(scope: string, files: BinaryFiles, ocrEnabled: boolean): Promise<Asset[]> {
   const added: Asset[] = [];
   for (const file of Object.values(files)) {
+    if (isRichTextFile(file.id)) continue;
     const key = recordKey(scope, file.id);
     if (await db.assets.get(key)) continue;
     let blob: Blob;
