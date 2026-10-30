@@ -23,15 +23,15 @@ export function richTextWidth(text: ExcalidrawTextElement, elements: readonly Ex
 }
 
 /** Text remains searchable and bound to its shape; a derived SVG supplies mixed styles. */
-export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: string) {
-  const plain = richDocText(doc), rich = hasRichFormatting(doc), customData = { ...text.customData };
+export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: string, keepDocument = false) {
+  const plain = richDocText(doc), rich = hasRichFormatting(doc) || (keepDocument && !!plain.trim()), customData = { ...text.customData };
   if (rich) customData.noteRichText = { version: 1, doc, color: safeTextColor(color) || '#1b1b1f' };
   else delete customData.noteRichText;
   mutateElement(text, { originalText: plain, text: plain, customData, isDeleted: !plain.trim() && !rich, strokeColor: rich ? 'transparent' : color, autoResize: !rich && !text.containerId }, false);
 }
 
 /** Runs in the canvas repair pass, including moves, rotation, resizing, undo, and reload. */
-export function repairRichTextElements(input: readonly ExcalidrawElement[]) {
+export function repairRichTextElements(input: readonly ExcalidrawElement[], editingId?: string) {
   const elements = [...input], files: BinaryFileData[] = [], byId = new Map(elements.map(element => [element.id, element]));
   const owners = new Set<string>(); let changed = false;
   function update(element: ExcalidrawElement, values: Record<string, any>) {
@@ -61,7 +61,7 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[]) {
     const angle = container && container.type !== 'arrow' ? container.angle : source.angle;
     update(source, { x, y, width: render.width, height: render.height, angle, autoResize: false, strokeColor: 'transparent' });
     const id = richRenderId(source.id); owners.add(id);
-    const attrs = { x, y, width: render.width, height: render.height, angle, opacity: source.opacity,
+    const attrs = { x, y, width: render.width, height: render.height, angle, opacity: source.id === editingId ? 0 : source.opacity,
       groupIds: source.groupIds, frameId: source.frameId, locked: true, fileId: render.file.id, isDeleted: false,
       customData: { noteRichTextRender: { ownerId: source.id }, ...(source.customData?.noteDiagram ? { noteDiagram: source.customData.noteDiagram } : {}) } };
     const image = byId.get(id);
@@ -76,4 +76,13 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[]) {
   // duplicated text instead. Undoing formatting also removes its old render.
   for (const element of elements) if (isRichRender(element) && !element.isDeleted && !owners.has(element.id)) update(element, { isDeleted: true });
   return { elements, files, changed };
+}
+
+/** The hidden editing preview is transient; saved boards always show their text. */
+export function richTextForStorage(elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
+  const byId = new Map(elements.map(element => [element.id, element]));
+  return elements.map(element => {
+    const owner = element.customData?.noteRichTextRender?.ownerId;
+    return owner && byId.has(owner) ? { ...element, opacity: byId.get(owner)!.opacity } : element;
+  });
 }

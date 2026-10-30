@@ -17,7 +17,7 @@ import { LockedObjectsControl } from './LockedObjectsControl';
 import { StampTools } from './StampTools';
 import { WritingTools } from './WritingTools';
 import { RichTextTools, type RichTextHandle } from './RichTextTools';
-import { applyRichText, repairRichTextElements } from '../lib/rich-text-scene';
+import { applyRichText, repairRichTextElements, richTextForStorage } from '../lib/rich-text-scene';
 import { clipboardRichDoc, richDocText } from '../lib/rich-text';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
@@ -47,6 +47,8 @@ function cleanAppState(state: AppState): Board['appState'] {
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; onImageState: (state: BoardImageState) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, onImageState, jumpId }, ref) {
   const [ready, setReady] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const apiRef = useRef(api); apiRef.current = api;
+  const draftVersion = useRef(0), savedDraftVersion = useRef(0);
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const chrome = useRef<BoardChromeHandle>(null);
   const richText = useRef<RichTextHandle>(null);
@@ -75,8 +77,16 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   // Open text and cached images immediately; remote files arrive progressively.
   const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => localSceneFiles(board.scope, boardImageIds(board.elements)).then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
   async function flush(includeTextDraft = true) {
+    const draft = richText.current?.draftElements(), canvasApi = apiRef.current, draftRevision = draftVersion.current;
     if (includeTextDraft) richText.current?.flush();
     if (timer.current) clearTimeout(timer.current);
+    if (draft && canvasApi) {
+      // Autosave the current inline document without splitting one edit across
+      // multiple board Undo entries. Its SVG is regenerated on the next open.
+      const scene = repairRichTextElements(structuredClone(draft));
+      repairDiagramElements(scene.elements);
+      pending.current = { elements: scene.elements, state: { ...cleanAppState(canvasApi.getAppState()), noteViewLock: viewLock.current }, files: { ...canvasApi.getFiles() } };
+    }
     const snapshot = pending.current; pending.current = null;
     if (snapshot) {
       savesInFlight.current++;
@@ -99,6 +109,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       }).catch(error => { pending.current ||= snapshot; latest.current.onMessage(`Could not save: ${error instanceof Error ? error.message : 'device storage is unavailable'}. Export your board before closing.`); throw error; }).finally(() => { savesInFlight.current--; });
     }
     await saving.current;
+    savedDraftVersion.current = Math.max(savedDraftVersion.current, draftRevision);
   }
   function changed(elements: readonly ExcalidrawElement[], state: AppState, files: BinaryFiles) {
     if (correcting.current) return;
@@ -108,7 +119,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
     let repaired = repairDiagramElements(elements, state);
-    const rich = repairRichTextElements(elements);
+    const rich = repairRichTextElements(elements, state.editingTextElement?.id);
     elements = rich.elements;
     repaired ||= rich.changed;
     for (const element of elements) {
@@ -136,12 +147,12 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       if (api && tool) api.setActiveTool(tool);
     } finally { correcting.current = false; }
     const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean);
-    setEmpty(!elements.some(x => !x.isDeleted));
+    setEmpty(!elements.some(x => !x.isDeleted) && !state.editingTextElement);
     if (!booted.current) { booted.current = true; setReady(true); if (!repaired) { lastSignature.current = signature; return; } }
     if (lastSignature.current === signature) return;
     lastSignature.current = signature;
     // Copy now: canvas file maps and app state can mutate during a delayed save.
-    pending.current = { elements: structuredClone(elements), state: structuredClone(clean), files: { ...files } };
+    pending.current = { elements: structuredClone(richTextForStorage(elements)), state: structuredClone(clean), files: { ...files } };
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void flush(false).catch(() => {}); }, 300);
   }
@@ -174,6 +185,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     toggleControls: () => chrome.current?.toggle(),
     reloadImages,
     exportPng: async () => {
+      richText.current?.finish();
       await flush(); if (!api || !api.getSceneElements().length) return null;
       await reloadImages();
       if (boardImageIds(api.getSceneElements()).some(id => !api.getFiles()[id])) throw new Error('Some board images could not load. Use Retry images before exporting a PNG.');
@@ -181,8 +193,21 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     }
   }), [api, settings.theme]);
   useEffect(() => {
+    if (!canvasRoot) return;
+    const draftChanged = () => {
+      draftVersion.current++;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => { void flush(false).catch(() => {}); }, 300);
+    };
+    canvasRoot.addEventListener('note-rich-text-change', draftChanged);
+    return () => canvasRoot.removeEventListener('note-rich-text-change', draftChanged);
+  }, [canvasRoot, api]);
+  useEffect(() => {
     const flushOnHide = () => { if (document.visibilityState === 'hidden') void flush().catch(() => {}); };
-    const beforeUnload = (event: BeforeUnloadEvent) => { if (pending.current || richText.current?.hasDraft()) { event.preventDefault(); void flush().catch(() => {}); } };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (pending.current || savesInFlight.current || draftVersion.current !== savedDraftVersion.current) event.preventDefault();
+      if (pending.current || richText.current?.hasDraft()) void flush(false).catch(() => {});
+    };
     document.addEventListener('visibilitychange', flushOnHide); window.addEventListener('beforeunload', beforeUnload);
     return () => { document.removeEventListener('visibilitychange', flushOnHide); window.removeEventListener('beforeunload', beforeUnload); void flush().catch(() => {}); };
   }, []);
@@ -198,6 +223,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       if (!booted.current) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       const images = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
       const text = event.clipboardData?.getData('text/plain') || '';
+      const html = event.clipboardData?.getData('text/html') || '';
       // Let the editor handle its own structured object clipboard.
       if (!images.length && (!text || text.includes('excalidraw/clipboard'))) return;
       event.preventDefault(); event.stopImmediatePropagation();
@@ -218,7 +244,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
             added.push(...convertToExcalidrawElements([{ type: 'image', x: x - width / 2 + index * 25, y: y - height / 2 + index * 25, width, height, fileId: id, status: 'saved', scale: [1, 1] }]));
           }
         } else {
-          const doc = clipboardRichDoc(text, raw);
+          const doc = clipboardRichDoc(text, raw, html);
           const created = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: x - 150, y: y - 30, fontSize: 20, fontFamily: 2, width: 300 }]);
           const source = created.find(element => element.type === 'text');
           if (source?.type === 'text') applyRichText(source, doc, state.currentItemStrokeColor);

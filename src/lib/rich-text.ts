@@ -1,4 +1,4 @@
-import { getSchema, type JSONContent } from '@tiptap/core';
+import { generateJSON, getSchema, type JSONContent } from '@tiptap/core';
 import type { Schema } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyleKit } from '@tiptap/extension-text-style';
@@ -105,6 +105,7 @@ export function withRichTextRenders<T extends { id: string; customData?: Record<
 }
 
 /** Raw mode also clears inherited marks at the insertion point. */
-export function clipboardRichDoc(text: string, raw: boolean): RichDoc {
-  return raw ? plainRichDoc(text) : markdownRichDoc(text);
+export function clipboardRichDoc(text: string, raw: boolean, html?: string): RichDoc {
+  if (raw) return plainRichDoc(text);
+  return html ? cleanRichDoc(generateJSON(html, richTextExtensions())) : markdownRichDoc(text);
 }

@@ -10,18 +10,29 @@ import { readDiagramData } from '../lib/diagram-model';
 import type { DiagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { RichTextEditor } from './RichTextEditor';
 
-export interface RichTextHandle { flush(): void; hasDraft(): boolean }
-interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; applied: string }
+export interface RichTextHandle { flush(): void; finish(): void; draftElements(): ExcalidrawElement[] | null; hasDraft(): boolean }
+interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; applied: string; width: number }
 export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null }>(function RichTextTools({ api, root }, ref) {
   const [session, setSession] = useState<Session | null>(null), current = useRef<Session | null>(null);
   const [host, setHost] = useState<Element | null>(null);
+  const [editorHeight, setEditorHeight] = useState(27), [, updateViewport] = useState('');
   const takingOver = useRef(false);
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-text"]') || null); }, [root]);
   useLayoutEffect(() => {
-    if (!root || !session) return;
-    const previous = root.inert; root.inert = true;
-    return () => { root.inert = previous; };
+    if (!root) return;
+    root.toggleAttribute('data-inline-editing', !!session);
+    return () => root.removeAttribute('data-inline-editing');
   }, [root, !!session]);
+  useEffect(() => api.onChange((_elements, state) => {
+    updateViewport(`${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.offsetLeft}:${state.offsetTop}:${state.width}:${state.height}`);
+  }), [api]);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (current.current && !(event.target instanceof Element && event.target.closest('[data-inline-text-editor]'))) finish(current.current.doc, undefined, false);
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [api, root]);
   useEffect(() => {
     for (const type of ['png', 'svg'] as const) api.registerAction({
       name: type === 'png' ? 'copyAsPng' : 'copyAsSvg', label: type === 'png' ? 'labels.copyAsPng' : 'labels.copyAsSvg',
@@ -45,19 +56,27 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     const data = readRichText(base), container = api.getSceneElements().find(element => element.id === base.containerId);
     const doc = data?.doc || plainRichDoc(base.originalText);
     const deleted = api.getSceneElementsIncludingDeleted().find(element => element.id === base.id)?.isDeleted;
-    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', applied: data && deleted ? '' : JSON.stringify(doc) };
-    current.current = next; setSession(next);
+    const state = api.getAppState(), zoom = state.zoom.value;
+    let width = Math.min(2400, base.containerId ? richTextWidth(base, api.getSceneElements()) : data || !base.autoResize ? Math.max(48, base.width) : Math.max(320, base.width));
+    const originX = container && ['rectangle', 'ellipse', 'diamond'].includes(container.type) ? container.x + (container.width - width) / 2 : base.x;
+    const left = (originX + state.scrollX) * zoom;
+    if (!base.containerId) width = Math.max(48, Math.min(width, (state.width - 16) / zoom, !data && base.autoResize ? (state.width - left - 16) / zoom : Infinity));
+    const targetLeft = Math.max(8, Math.min(left, state.width - width * zoom - 8));
+    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', applied: data && deleted ? '' : JSON.stringify(doc), width };
+    current.current = next; setEditorHeight(base.height || base.fontSize * 1.35); setSession(next);
+    api.updateScene({ appState: { editingTextElement: { ...base, isDeleted: false }, selectedElementIds: {}, selectedGroupIds: {}, openMenu: null, scrollX: state.scrollX + (targetLeft - left) / zoom }, captureUpdate: CaptureUpdateAction.NEVER });
   }
-  function saveDraft() {
-    const active = current.current; if (!active) return;
-    const signature = JSON.stringify(active.doc); if (signature === active.applied) return;
+  function draftScene() {
+    const active = current.current; if (!active) return null;
+    const signature = JSON.stringify(active.doc); if (signature === active.applied) return null;
     const elements: ExcalidrawElement[] = [...api.getSceneElementsIncludingDeleted()];
     const index = elements.findIndex(element => element.id === active.base.id), existing = elements[index];
     // Pass a replacement to updateScene. Mutating the live scene first makes
     // the editor classify that change as an unfinished native edit, losing Undo.
     const text = structuredClone(existing?.type === 'text' ? existing : active.base);
     if (index < 0) elements.push(text); else elements[index] = text;
-    applyRichText(text, active.doc, active.color);
+    mutateElement(text, { width: active.width }, false);
+    applyRichText(text, active.doc, active.color, true);
     if (!readRichText(text)) {
       const [measured] = convertToExcalidrawElements([{ type: 'text', text: richDocText(active.doc), x: text.x, y: text.y,
         fontSize: text.fontSize, fontFamily: text.fontFamily, textAlign: text.textAlign, verticalAlign: text.verticalAlign,
@@ -92,15 +111,24 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
       }
       if (Object.keys(updates).length) { const replacement = structuredClone(element); mutateElement(replacement, updates, false); elements[position] = replacement; }
     }
-    api.updateScene({ elements, appState: { selectedElementIds: text.isDeleted ? {} : { [text.containerId || text.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
-    active.applied = signature;
+    return { elements, text, active, signature };
   }
-  useImperativeHandle(ref, () => ({ flush: saveDraft, hasDraft: () => !!current.current }));
-  function finish(doc: RichDoc, relation?: DiagramShortcutRelation) {
+  function saveDraft() {
+    const draft = draftScene(); if (!draft) return;
+    api.updateScene({ elements: draft.elements, appState: { editingTextElement: draft.text.isDeleted ? null : { ...draft.text, isDeleted: false }, selectedElementIds: {}, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    draft.active.applied = draft.signature;
+  }
+  useImperativeHandle(ref, () => ({ flush: saveDraft, finish: () => { if (current.current) finish(current.current.doc, undefined, false); }, draftElements: () => draftScene()?.elements || null, hasDraft: () => !!current.current }));
+  function finish(doc: RichDoc, relation?: DiagramShortcutRelation, focusCanvas = true) {
     if (!current.current) return;
+    const id = current.current.base.id;
     current.current.doc = doc;
-    flushSync(() => { saveDraft(); current.current = null; setSession(null); });
-    const canvas = root?.querySelector<HTMLElement>('.excalidraw'); canvas?.focus();
+    flushSync(() => {
+      saveDraft(); current.current = null; setSession(null);
+      const text = api.getSceneElements().find(element => element.id === id);
+      api.updateScene({ appState: { editingTextElement: null, selectedElementIds: text ? { [text.type === 'text' && text.containerId || text.id]: true } : {} }, captureUpdate: CaptureUpdateAction.NEVER });
+    });
+    const canvas = root?.querySelector<HTMLElement>('.excalidraw'); if (focusCanvas) canvas?.focus();
     if (relation) canvas?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: relation === 'sibling', bubbles: true, cancelable: true }));
   }
   useEffect(() => {
@@ -130,6 +158,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     return () => { if (timer) clearTimeout(timer); unsubscribe(); observer.disconnect(); root.removeEventListener('note-rich-text-edit', takeOver); };
   }, [api, root]);
   function formatSelected() {
+    if (current.current) return;
     root?.dispatchEvent(new Event('note-board-tool-activate'));
     const state = api.getAppState(), text = selectedText(api.getSceneElements(), state.selectedElementIds);
     if (text) { start(text); return; }
@@ -139,8 +168,20 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
       canvas?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
     } else api.setActiveTool({ type: 'text' });
   }
+  const state = api.getAppState(), liveText = session && api.getSceneElements().find(element => element.id === session.base.id);
+  const parent = session && api.getSceneElements().find(element => element.id === session.base.containerId);
+  const geometry = liveText?.type === 'text' ? liveText : session?.base;
+  let x = geometry?.x || 0, y = geometry?.y || 0;
+  if (session && parent && ['rectangle', 'ellipse', 'diamond'].includes(parent.type)) {
+    x = parent.x + (parent.width - session.width) / 2;
+    if (session.base.verticalAlign === 'middle') y = parent.y + (parent.height - editorHeight) / 2;
+    else if (session.base.verticalAlign === 'bottom') y = parent.y + parent.height - editorHeight - 5;
+  }
   return <>
     {host && createPortal(<button aria-label="Text and formatting" title="Add text, or format selected text and diagram labels" onClick={formatSelected}><Type size={15} /><span>Format text</span></button>, host)}
-    {session && createPortal(<RichTextEditor key={session.base.id} doc={session.doc} fontSize={session.base.fontSize} color={session.color} textAlign={session.base.textAlign === 'center' ? 'center' : session.base.textAlign === 'right' ? 'right' : 'left'} diagram={session.diagram} selectAll={session.selectAll} onDraft={doc => { if (current.current) current.current.doc = doc; }} onApply={finish} />, document.body)}
+    {session && createPortal(<RichTextEditor key={session.base.id} doc={session.doc} fontSize={session.base.fontSize} color={session.color} opacity={session.base.opacity / 100} textAlign={session.base.textAlign === 'center' ? 'center' : session.base.textAlign === 'right' ? 'right' : 'left'} diagram={session.diagram} selectAll={session.selectAll}
+      position={{ left: state.offsetLeft + (x + state.scrollX) * state.zoom.value, top: state.offsetTop + (y + state.scrollY) * state.zoom.value }} width={session.width} zoom={state.zoom.value} angle={parent && parent.type !== 'arrow' ? parent.angle : session.base.angle} minHeight={session.base.fontSize * 1.35}
+      boardBounds={{ left: state.offsetLeft, top: state.offsetTop, right: state.offsetLeft + state.width, bottom: state.offsetTop + state.height }} onCaretPan={(dx, dy) => { const currentState = api.getAppState(); api.updateScene({ appState: { scrollX: currentState.scrollX + dx / currentState.zoom.value, scrollY: currentState.scrollY + dy / currentState.zoom.value }, captureUpdate: CaptureUpdateAction.NEVER }); }}
+      onHeight={setEditorHeight} onDraft={doc => { if (current.current) { current.current.doc = doc; root?.dispatchEvent(new Event('note-rich-text-change')); } }} onApply={finish} />, document.body)}
   </>;
 });
