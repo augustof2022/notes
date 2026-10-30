@@ -8,6 +8,7 @@ import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, rea
 import { attachDiagramEdge, createDiagramEdge, createObjectConnection, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
 import { connectionPrimary, connectionTarget, connectionTargetAt, selectedConnectionTargets } from '../lib/connection-targets';
 import { diagramShortcutNode, diagramShortcutRelation } from '../lib/diagram-shortcuts';
+import { installConnectionBendEditing } from '../lib/connection-bend-editing';
 import { richTextColor } from '../lib/rich-text';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
 import './diagram.css';
@@ -80,6 +81,13 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const chosen = selection.node || selection.edge || selection.object?.element;
   const live = useRef({ enabled, panel, placing, sourceId, connection, system, presetId, baseStyle });
   live.current = { enabled, panel, placing, sourceId, connection, system, presetId, baseStyle };
+  useEffect(() => {
+    if (!root) return;
+    return installConnectionBendEditing(root, api, {
+      enabled: () => !live.current.panel && !live.current.placing && !live.current.sourceId,
+      commit: apply => flushSync(apply), onMessage,
+    });
+  }, [api, root, onMessage]);
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-diagrams"]') || null); }, [root]);
   useLayoutEffect(() => {
     if (!root) return;
@@ -369,8 +377,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (!edge) return;
     flushSync(() => { api.updateScene({ appState: { selectedElementIds: { [edge.id]: true }, selectedGroupIds: {}, openMenu: null }, captureUpdate: CaptureUpdateAction.NEVER }); });
     const editor = root?.querySelector<HTMLElement>('.excalidraw'); editor?.focus();
-    if (edge.elbowed) onMessage('Drag a connection segment to add a bend or change its route.');
-    else editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+    if (!edge.elbowed) editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+    onMessage('Double-click or double-tap a bend to remove it, or a line segment to add a point. Right-angle connections switch to a manual route when you edit points.');
   }
 
   const bounds = root?.getBoundingClientRect();
