@@ -5,7 +5,7 @@ import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, Ex
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText } from 'lucide-react';
 import type { Board, Settings, ViewLock } from '../types';
-import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
+import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, repairedSceneElements, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
 import { PenWidthPanel } from './PenWidthPanel';
 import { SnapControls } from './SnapControls';
@@ -131,17 +131,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       const updates = constantInkUpdates(element);
       if (updates) { repairElement(element, updates, false); repaired = true; }
     }
-    // Route arrows while their original objects still belong to the native
-    // scene, then submit replacements. Leaving repairs on the live objects
-    // makes the canvas defer them as unfinished user edits and later adds an
-    // invisible Undo step, such as a label's layout after creating a child.
-    elements = elements.map(element => {
-      const original = originals.get(element);
-      if (!original || original.version === element.version) return element;
-      const replacement = { ...element };
-      Object.assign(element, original);
-      return replacement;
-    });
+    // Keep the native pen's live object until drawing finishes. Other repairs
+    // use replacements to preserve a single Undo step for the user's action.
+    elements = repairedSceneElements(elements, originals, state.newElement);
     const correction = viewLockCorrection(state, viewLock.current);
     const tool = stickyTextTool(state.activeTool, previousTool.current);
     const selectedElementIds = { ...state.selectedElementIds };

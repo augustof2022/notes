@@ -8,6 +8,20 @@ export function constantInkUpdates(element: ExcalidrawElement) {
   // Fixed pressure also disables the editor's speed-based simulated pressure.
   return { simulatePressure: false, pressures: element.points.map(() => 0.5), width: element.width };
 }
+export function repairedSceneElements(elements: readonly ExcalidrawElement[], originals: ReadonlyMap<ExcalidrawElement, ExcalidrawElement>, drawingElement: AppState['newElement']) {
+  return elements.map(element => {
+    const original = originals.get(element);
+    if (!original || original.version === element.version) return element;
+    // The native drawing gesture keeps this exact object for later points.
+    // Replacing it detaches the stroke from the scene and leaves only a dot.
+    if (element.id === drawingElement?.id) return element;
+    // Completed repairs use replacements so native history does not record
+    // layout/attachment corrections as another user edit on the next gesture.
+    const replacement = { ...element };
+    Object.assign(element, original);
+    return replacement;
+  });
+}
 export function viewLockCorrection(state: Pick<AppState, 'zoom'>, lock: ViewLock | null) {
   // Older boards include scroll coordinates in their lock; deliberately ignore them.
   return lock && state.zoom.value !== lock.zoom.value ? { zoom: lock.zoom } : null;
