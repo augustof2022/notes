@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { CaptureUpdateAction, newElementWith } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
@@ -8,15 +8,18 @@ import { Modal } from './Modal';
 import { inkWorldSamples, recognizeInkShape, type InkPoint, type InkShape } from '../lib/ink-geometry';
 import { cleanShapeFromInk, eraseInkElements, PARTIAL_ERASER_TOOL, readWritingPreferences, storeWritingPreferences, type WritingPreferences } from '../lib/ink-scene';
 import { stampScenePoint } from '../lib/stamp-placement';
+import { applyErasedObjects, eraseRasterObjects, type EraseSegment } from '../lib/raster-erase';
 import './writing-tools.css';
 
 const HOLD_MS = 650;
 const partial = (tool: { type: string; customType?: string | null }) => tool.type === 'custom' && tool.customType === PARTIAL_ERASER_TOOL;
 const dialogOpen = () => [...document.querySelectorAll<HTMLElement>('.modal-backdrop,[aria-modal="true"],dialog[open]')].some(element => !element.closest('.excalidraw') && element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
-interface EraseGesture { id: number; last: InkPoint; pending: InkPoint[]; baseline: readonly ExcalidrawElement[]; touched: Set<string>; changed: boolean }
+interface EraseGesture { id: number; last: InkPoint; pending: InkPoint[]; baseline: readonly ExcalidrawElement[]; touched: Set<string>; changed: boolean;
+  segments: EraseSegment[]; deferred: boolean; cancelled: boolean; done: Promise<void>; resolve: () => void }
 interface HoldGesture { id: number; strokeId: string; x: number; y: number; shape: InkShape | null }
+export interface WritingHandle { flush: () => Promise<void>; busy: () => boolean }
 
-export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null; onMessage: (message: string) => void }) {
+export const WritingTools = forwardRef<WritingHandle, { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null; onMessage: (message: string) => void }>(function WritingTools({ api, root, onMessage }, ref) {
   const [preferences, setPreferences] = useState(readWritingPreferences), [opened, setOpened] = useState(false);
   const [host, setHost] = useState<Element | null>(null), [active, setActive] = useState(false);
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null), [suggestion, setSuggestion] = useState<InkShape | null>(null);
@@ -24,6 +27,8 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const live = useRef({ preferences, opened, onMessage }); live.current = { preferences, opened, onMessage };
   const erasing = useRef<EraseGesture | null>(null), holding = useRef<HoldGesture | null>(null);
   const pointers = useRef(new Set<number>()), timer = useRef<ReturnType<typeof setTimeout> | null>(null), frame = useRef(0);
+  const jobs = useRef(Promise.resolve()), queued = useRef(new Set<EraseGesture>()), mounted = useRef(true), [processing, setProcessing] = useState(false);
+  useImperativeHandle(ref, () => ({ flush: async () => { if (erasing.current) await erasing.current.done; await jobs.current; }, busy: () => !!erasing.current || queued.current.size > 0 }), [api]);
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-writing"]') || null); }, [root]);
   function stopHold() { if (timer.current) clearTimeout(timer.current); timer.current = null; holding.current = null; setSuggestion(null); }
   function flushErase() {
@@ -34,7 +39,8 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
     let changed = false;
     const radius = live.current.preferences.eraserSize / (2 * api.getAppState().zoom.value);
     for (const to of gesture.pending.splice(0)) {
-      const next = eraseInkElements(elements, gesture.last, to, radius);
+      gesture.segments.push({ from: gesture.last, to, radius });
+      const next = gesture.deferred ? null : eraseInkElements(elements, gesture.last, to, radius);
       if (next) {
         const previous = new Map(elements.map(element => [element.id, element]));
         for (const element of next) if (previous.get(element.id) !== element) gesture.touched.add(element.id);
@@ -44,10 +50,8 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
     }
     if (changed) api.updateScene({ elements, captureUpdate: CaptureUpdateAction.EVENTUALLY });
   }
-  function endErase(rollback = false) {
-    flushErase(); const gesture = erasing.current; erasing.current = null;
-    if (!gesture?.changed) return;
-    if (rollback) {
+  function restoreErase(gesture: EraseGesture) {
+    if (gesture.changed) {
       const baseline = new Map(gesture.baseline.map(element => [element.id, element]));
       const elements = api.getSceneElementsIncludingDeleted().map(element => {
         if (!gesture.touched.has(element.id)) return element;
@@ -59,7 +63,40 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
         return element.type === 'freedraw' ? newElementWith(element, { isDeleted: true }) : element;
       });
       api.updateScene({ elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
-    } else api.updateScene({ elements: api.getSceneElementsIncludingDeleted(), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    }
+  }
+  function cancelPending() {
+    for (const gesture of queued.current) { if (!gesture.cancelled) { gesture.cancelled = true; restoreErase(gesture); } queued.current.delete(gesture); gesture.resolve(); }
+    jobs.current = Promise.resolve(); setProcessing(false);
+  }
+  function endErase(rollback = false) {
+    flushErase(); const gesture = erasing.current; erasing.current = null;
+    if (!gesture) return;
+    if (rollback) { restoreErase(gesture); gesture.resolve(); return; }
+    queued.current.add(gesture); setProcessing(true);
+    jobs.current = jobs.current.then(async () => {
+      if (gesture.cancelled || !mounted.current) return;
+      const base = api.getSceneElementsIncludingDeleted(), inkIds = new Set(base.filter(e => e.type === 'freedraw').map(e => e.id));
+      const raster = await eraseRasterObjects(base, api.getFiles(), gesture.segments);
+      if (gesture.cancelled || !mounted.current) return;
+      let elements: readonly ExcalidrawElement[] = api.getSceneElementsIncludingDeleted(), inkChanged = false;
+      if (gesture.deferred) for (const segment of gesture.segments) {
+        const erased = eraseInkElements(elements, segment.from, segment.to, segment.radius, inkIds);
+        if (!erased) continue;
+        const oldIds = new Set(elements.map(e => e.id)); elements = erased;
+        for (const element of erased) if (!oldIds.has(element.id) && element.type === 'freedraw') inkIds.add(element.id);
+        inkChanged = true;
+      }
+      const result = applyErasedObjects(elements, raster);
+      if (gesture.changed || inkChanged || result.changed) flushSync(() => {
+        if (result.files.length) api.addFiles(result.files);
+        api.updateScene({ elements: result.elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      });
+      if (result.converted) live.current.onMessage('Partially erased shapes, text, and connections are now image cutouts. Undo restores the editable originals.');
+      if (result.skipped) live.current.onMessage('Some objects could not be erased yet. Wait for images to load, then try again.');
+    }).catch(() => {
+      if (mounted.current && !gesture.cancelled) { restoreErase(gesture); live.current.onMessage('Could not finish this erase. Try a shorter stroke or wait for images to finish loading.'); }
+    }).finally(() => { queued.current.delete(gesture); gesture.resolve(); if (mounted.current) setProcessing(queued.current.size > 0); });
   }
   function activateEraser(mode = live.current.preferences.eraserMode) {
     if (!root || api.getAppState().viewModeEnabled) return;
@@ -95,6 +132,7 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
   }
   useEffect(() => {
     if (!root) return;
+    mounted.current = true;
     const unsubscribeChange = api.onChange((_elements, state) => {
       setActive(partial(state.activeTool) || state.activeTool.type === 'eraser');
       if (!partial(state.activeTool)) { setTip(null); if (erasing.current) endErase(); }
@@ -134,7 +172,9 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
       if (event.button !== 0 || !event.isPrimary || pointers.current.size > 1 || api.getAppState().viewModeEnabled || api.getAppState().openDialog || dialogOpen()) return;
       if (partial(tool)) {
         const p = stampScenePoint({ x: event.clientX, y: event.clientY }, api.getAppState());
-        erasing.current = { id: event.pointerId, last: [p.x, p.y], pending: [[p.x, p.y]], baseline: structuredClone(api.getSceneElementsIncludingDeleted()), touched: new Set(), changed: false };
+        let resolve!: () => void; const done = new Promise<void>(finish => { resolve = finish; });
+        erasing.current = { id: event.pointerId, last: [p.x, p.y], pending: [[p.x, p.y]], baseline: structuredClone(api.getSceneElementsIncludingDeleted()), touched: new Set(), changed: false,
+          segments: [], deferred: queued.current.size > 0, cancelled: false, done, resolve };
         flushErase(); api.setCursor('crosshair');
       } else if (tool.type === 'freedraw' && live.current.preferences.holdShapes) {
         const stroke = api.getSceneElements().filter(element => element.type === 'freedraw' && !element.isDeleted).at(-1);
@@ -159,7 +199,7 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
       if (live.current.opened || dialogOpen() || api.getAppState().openDialog || api.getAppState().contextMenu || event.isComposing || event.repeat) return;
       const editor = root.querySelector('.excalidraw'), target = event.target;
       if (!editor || !(target instanceof HTMLElement) || !editor.contains(target) || (target !== editor && !(target instanceof HTMLCanvasElement))) return;
-      if (event.key === 'Escape' && (erasing.current || holding.current)) { event.preventDefault(); event.stopImmediatePropagation(); stopHold(); endErase(true); return; }
+      if ((event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z')) && (erasing.current || holding.current || queued.current.size)) { event.preventDefault(); event.stopImmediatePropagation(); stopHold(); endErase(true); cancelPending(); return; }
       if (event.key.toLowerCase() === 'e' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.defaultPrevented && !api.getAppState().editingTextElement) {
         event.preventDefault(); event.stopImmediatePropagation(); activateEraser();
       }
@@ -168,6 +208,7 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
     document.addEventListener('keydown', key, true); root.addEventListener('pointerdown', down, true);
     window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', up, true); window.addEventListener('blur', blur);
     return () => {
+      mounted.current = false; for (const gesture of queued.current) gesture.cancelled = true; erasing.current?.resolve();
       unsubscribeChange(); unsubscribeDown(); unsubscribeUp();
       document.removeEventListener('keydown', key, true); root.removeEventListener('pointerdown', down, true);
       window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); window.removeEventListener('blur', blur);
@@ -180,15 +221,17 @@ export function WritingTools({ api, root, onMessage }: { api: ExcalidrawImperati
   return <>
     {host && createPortal(<div className="ink-tools"><button className="ink-eraser-main" aria-pressed={active} title="Eraser (E)" aria-label={`Activate ${preferences.eraserMode === 'partial' ? 'Partial' : 'Object'} eraser (E)`} onClick={() => activateEraser()}><Eraser size={16} /><span className="ink-eraser-full-label">{preferences.eraserMode === 'partial' ? 'Partial eraser' : 'Object eraser'}</span><span className="ink-eraser-short-label">{preferences.eraserMode === 'partial' ? 'Partial' : 'Object'}</span></button><button className="ink-settings-trigger" aria-label="Writing tool settings" aria-haspopup="dialog" onClick={() => { stopHold(); endErase(); setOpened(true); }}><ChevronDown size={14} /></button></div>, host)}
     {tip && active && preferences.eraserMode === 'partial' && !opened && <div className="ink-eraser-tip" style={{ left: tip.x, top: tip.y, width: preferences.eraserSize, height: preferences.eraserSize }} />}
+    {processing && <div className="ink-hold-status" role="status">Applying erase…</div>}
     {shape && origin && <><svg className="ink-shape-preview" aria-hidden="true"><g transform={`translate(${origin.x} ${origin.y}) rotate(${shape.angle * 180 / Math.PI} ${shape.width * z / 2} ${shape.height * z / 2})`}>
       {shape.kind === 'ellipse' ? <ellipse cx={shape.width * z / 2} cy={shape.height * z / 2} rx={shape.width * z / 2} ry={shape.height * z / 2} /> : shape.kind === 'rectangle' ? <rect width={shape.width * z} height={shape.height * z} /> : <polyline points={shape.points!.map(([x, y]) => `${x * z},${y * z}`).join(' ')} />}
     </g></svg><div className="ink-hold-status" role="status">{shape.label} ready · lift to apply, or keep drawing</div></>}
     {opened && createPortal(<Modal title="Writing tools" onClose={closeSettings}>
-      <fieldset className="ink-eraser-modes"><legend>Eraser mode</legend>{(['partial', 'object'] as const).map(mode => <label key={mode}><input type="radio" name="note-eraser-mode" value={mode} checked={preferences.eraserMode === mode} onChange={() => change({ ...preferences, eraserMode: mode })} /><span><strong>{mode === 'partial' ? 'Partial eraser' : 'Object eraser'}</strong><small>{mode === 'partial' ? 'Erase only the pen ink under the tip. Shapes, text, and images stay intact.' : 'Delete each whole stroke, shape, or image you touch.'}</small></span></label>)}</fieldset>
+      <fieldset className="ink-eraser-modes"><legend>Eraser mode</legend>{(['partial', 'object'] as const).map(mode => <label key={mode}><input type="radio" name="note-eraser-mode" value={mode} checked={preferences.eraserMode === mode} onChange={() => change({ ...preferences, eraserMode: mode })} /><span><strong>{mode === 'partial' ? 'Partial eraser' : 'Object eraser'}</strong><small>{mode === 'partial' ? 'Erase portions of drawings, shapes, images, text, icons, and connections. Locked objects stay protected.' : 'Delete each whole stroke, shape, text object, or image you touch.'}</small></span></label>)}</fieldset>
+      <p className="small-note">Partially erased shapes, text, and connections become transparent image cutouts. You can move, resize, rotate, group, and lock them; Undo restores the original editable objects. Cutouts appear when you lift the eraser.</p>
       <label className="ink-size">Partial eraser size <span>{preferences.eraserSize} px</span><input type="range" min="8" max="96" step="2" value={preferences.eraserSize} onChange={event => change({ ...preferences, eraserSize: Number(event.target.value) })} /></label>
       <label className="ink-hold-option"><input type="checkbox" checked={preferences.holdShapes} onChange={event => change({ ...preferences, holdShapes: event.target.checked })} /><span><strong>Draw and hold to shape</strong><small>With the pen, pause for about ⅔ second before lifting to straighten a line or clean up a circle, ellipse, square, rectangle, or triangle. Lift immediately to keep your ink. Uncertain scribbles stay unchanged.</small></span></label>
       <p className="small-note">Use Undo to restore erased ink or undo a shape correction. These preferences stay on this browser.</p>
       <div className="dialog-actions"><button className="secondary-button" onClick={() => { flushSync(() => setOpened(false)); activateEraser(); }}>Use eraser</button><button className="primary-button" onClick={closeSettings}>Done</button></div>
     </Modal>, document.body)}
   </>;
-}
+});

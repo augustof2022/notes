@@ -38,7 +38,8 @@ export function boardObjects(elements: readonly ExcalidrawElement[]): BoardObjec
   const roots: BoardObject[] = [], groups = new Map<string, BoardObject>();
   for (const [id, items] of members) {
     const owner = owners.get(id)!, text = owner.type === 'text' ? owner : items.find(element => element.type === 'text');
-    const words = (text?.type === 'text' ? text.originalText || text.text || '' : '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const cutout = typeof owner.customData?.noteErasedFrom?.label === 'string' ? `${owner.customData.noteErasedFrom.label} · cutout` : '';
+    const words = (cutout || (text?.type === 'text' ? text.originalText || text.text || '' : '')).replace(/\s+/g, ' ').trim().slice(0, 120);
     const kind = objectKind(owner), actual = items.filter(element => !element.customData?.noteRichTextRender);
     const node: BoardObject = { key: `object:${id}`, label: words || kind, kind, elementIds: items.map(element => element.id), selectableIds: actual.map(element => element.id), children: [],
       locked: actual.length > 0 && actual.every(element => element.locked), partlyLocked: actual.some(element => element.locked), order: Math.max(...items.map(element => order.get(element.id) || 0)) };

@@ -15,8 +15,9 @@ import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snap
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
 import { LayersSidebar } from './LayersSidebar';
+import { ObjectColors } from './ObjectColors';
 import { StampTools } from './StampTools';
-import { WritingTools } from './WritingTools';
+import { WritingTools, type WritingHandle } from './WritingTools';
 import { RichTextTools, type RichTextHandle } from './RichTextTools';
 import { applyRichText, repairRichTextElements, richTextForStorage } from '../lib/rich-text-scene';
 import { clipboardRichDoc, richDocText } from '../lib/rich-text';
@@ -42,7 +43,7 @@ export interface CanvasHandle {
 function cleanAppState(state: AppState): Board['appState'] {
   return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
     currentItemFontFamily: state.currentItemFontFamily, currentItemRoughness: state.currentItemRoughness,
-    currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemFontSize: state.currentItemFontSize,
+    currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemBackgroundColor: state.currentItemBackgroundColor, currentItemFontSize: state.currentItemFontSize,
     gridStep: state.gridStep, ...restoreSnapping(state) };
 }
 export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; onImageState: (state: BoardImageState) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, onImageState, jumpId }, ref) {
@@ -53,6 +54,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const [canvasRoot, setCanvasRoot] = useState<HTMLDivElement | null>(null);
   const chrome = useRef<BoardChromeHandle>(null);
   const richText = useRef<RichTextHandle>(null);
+  const writing = useRef<WritingHandle>(null);
   const [empty, setEmpty] = useState(!board.elements.some(x => !x.isDeleted));
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
   const [snapping, setSnapping] = useState(() => restoreSnapping(board.appState));
@@ -78,6 +80,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   // Open text and cached images immediately; remote files arrive progressively.
   const initialData = useMemo<Promise<ExcalidrawInitialDataState>>(() => localSceneFiles(board.scope, boardImageIds(board.elements)).then(files => ({ elements: board.elements, appState: { currentItemStrokeWidth: DEFAULT_PEN_WIDTH, ...board.appState, ...restoreSnapping(board.appState), theme: settings.theme }, files, scrollToContent: board.elements.length > 0 && !board.appState.zoom })), [board.key]);
   async function flush(includeTextDraft = true) {
+    await writing.current?.flush();
     const draft = richText.current?.draftElements(), canvasApi = apiRef.current, draftRevision = draftVersion.current;
     if (includeTextDraft) richText.current?.flush();
     if (timer.current) clearTimeout(timer.current);
@@ -92,7 +95,11 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (snapshot) {
       savesInFlight.current++;
       saving.current = saving.current.catch(() => {}).then(async () => {
-        const assets = await storeSceneFiles(board.scope, snapshot.files, latest.current.settings.ocrEnabled);
+        // Keep intermediate cutout files in canvas Undo memory; persist/upload
+        // only images referenced by the current scene after the save debounce.
+        const used = new Set<string>(boardImageIds(snapshot.elements));
+        const files = Object.fromEntries(Object.entries(snapshot.files).filter(([id]) => used.has(id)));
+        const assets = await storeSceneFiles(board.scope, files, latest.current.settings.ocrEnabled);
         let edited = false;
         await db.transaction('rw', db.boards, async () => {
           const current = await db.boards.get(board.key);
@@ -188,7 +195,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   function hasPendingChanges(key: string) {
     if (key !== board.key) return false;
     const state = api?.getAppState();
-    return !booted.current || !!pending.current || savesInFlight.current > 0 || !!richText.current?.hasDraft() || !!state?.editingTextElement || state?.cursorButton === 'down' || !!state?.isResizing;
+    return !booted.current || !!pending.current || savesInFlight.current > 0 || !!richText.current?.hasDraft() || !!writing.current?.busy() || !!state?.editingTextElement || state?.cursorButton === 'down' || !!state?.isResizing;
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo, hasPendingChanges,
     toggleControls: () => chrome.current?.toggle(),
@@ -214,7 +221,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   useEffect(() => {
     const flushOnHide = () => { if (document.visibilityState === 'hidden') void flush().catch(() => {}); };
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (pending.current || savesInFlight.current || draftVersion.current !== savedDraftVersion.current) event.preventDefault();
+      if (pending.current || savesInFlight.current || writing.current?.busy() || draftVersion.current !== savedDraftVersion.current) event.preventDefault();
       if (pending.current || richText.current?.hasDraft()) void flush(false).catch(() => {});
     };
     document.addEventListener('visibilitychange', flushOnHide); window.addEventListener('beforeunload', beforeUnload);
@@ -290,7 +297,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
     {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
-      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'text', title: 'Text and formatting' },
+      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'colors', title: 'Stroke and background colors' }, { id: 'text', title: 'Text and formatting' },
       { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
         setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
@@ -305,8 +312,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
     {api && ready && <LayersSidebar api={api} root={canvasRoot} scope={board.key} onMessage={onMessage} />}
+    {api && ready && <ObjectColors api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
-    {api && ready && <WritingTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <WritingTools ref={writing} api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <RichTextTools ref={richText} api={api} root={canvasRoot} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}

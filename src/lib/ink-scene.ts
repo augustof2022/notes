@@ -21,10 +21,10 @@ function withoutHandwriting(customData: ExcalidrawElement['customData']) {
 }
 
 /** Preserve untouched objects and original ids; only split the ink intersected by the eraser. */
-export function eraseInkElements(elements: readonly ExcalidrawElement[], from: InkPoint, to: InkPoint, radius: number): ExcalidrawElement[] | null {
+export function eraseInkElements(elements: readonly ExcalidrawElement[], from: InkPoint, to: InkPoint, radius: number, only?: ReadonlySet<string>): ExcalidrawElement[] | null {
   let changed = false;
   const next = elements.flatMap(element => {
-    if (element.type !== 'freedraw' || element.isDeleted || element.locked || !element.points.length) return [element];
+    if (element.type !== 'freedraw' || element.isDeleted || element.locked || !element.points.length || (only && !only.has(element.id)) || (element.backgroundColor && element.backgroundColor !== 'transparent')) return [element];
     const samples = inkWorldSamples(element), padding = radius + element.strokeWidth / 2;
     const xs = samples.map(p => p.point[0]), ys = samples.map(p => p.point[1]);
     if (Math.max(...xs) < Math.min(from[0], to[0]) - padding || Math.min(...xs) > Math.max(from[0], to[0]) + padding

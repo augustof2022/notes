@@ -1,0 +1,15 @@
+.object-color-field{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px;min-width:0}
+.object-color-heading{display:flex;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:12px}.object-color-heading span{font-size:10px;color:var(--muted)}
+.object-color-swatches{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:6px}
+.object-color-swatches button{height:28px;min-width:0;border:1px solid #8885;border-radius:5px;position:relative}
+.object-color-swatches button[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:2px}
+.object-color-custom{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.object-color-custom>button,.object-color-picker{display:flex;align-items:center;justify-content:center;flex-direction:row;gap:6px;min-height:38px;border:1px solid var(--line);border-radius:6px;padding:5px 9px;margin:0;font-size:11px;font-weight:400;color:var(--ink)}
+.object-color-none[aria-pressed="true"]{outline:2px solid var(--accent)}
+.checkerboard{background-color:var(--panel);background-image:linear-gradient(45deg,#a5a1ac22 25%,transparent 25%),linear-gradient(-45deg,#a5a1ac22 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#a5a1ac22 75%),linear-gradient(-45deg,transparent 75%,#a5a1ac22 75%);background-size:12px 12px;background-position:0 0,0 6px,6px -6px,-6px 0}
+.object-color-field .object-color-picker input[type="color"]{width:32px;height:28px;padding:0;border:0;background:transparent;cursor:pointer}
+.object-color-hex{display:flex;gap:8px;align-items:center;margin-top:10px}.object-color-field .object-color-hex input{min-width:0;font-size:12px;padding:8px}.object-color-hex button{padding:8px 10px;min-height:36px;border:1px solid var(--line);border-radius:6px;font-size:11px}
+.color-error{font-size:11px;color:#b45309;margin-top:8px}
+.object-more-colors{margin-bottom:10px}.excalidraw .object-more-colors-button{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:40px;padding:8px;border:1px solid var(--line);border-radius:6px;color:var(--accent);background:var(--accent-light);font:inherit;font-size:11px}
+.diagram-panel .object-color-field{grid-column:1/-1}.diagram-panel .object-color-swatches{grid-template-columns:repeat(12,minmax(0,1fr))}
+@media(pointer:coarse){.object-color-swatches button{height:32px}.object-color-custom>button,.object-color-picker{min-height:44px}}
+@media(max-width:560px){.object-color-swatches{grid-template-columns:repeat(6,minmax(0,1fr))}.diagram-panel .object-color-swatches{grid-template-columns:repeat(8,minmax(0,1fr))}}

@@ -324,7 +324,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
       const data = readDiagramData(element);
       if (element.id !== primary.id && !(data?.kind === 'decoration' && data.nodeId === primary.id)) continue;
       mutateElement(element, { ...(patch.fill !== undefined && selected.node ? { backgroundColor: data?.kind === 'decoration' ? 'transparent' : patch.fill } : {}),
-        ...(patch.stroke !== undefined ? { strokeColor: patch.stroke } : {}), ...(patch.width !== undefined ? { strokeWidth: patch.width } : {}), ...(patch.strokeStyle !== undefined ? { strokeStyle: patch.strokeStyle } : {}) });
+        ...(patch.stroke !== undefined && element.type !== 'text' ? { strokeColor: patch.stroke } : {}), ...(patch.width !== undefined ? { strokeWidth: patch.width } : {}), ...(patch.strokeStyle !== undefined ? { strokeStyle: patch.strokeStyle } : {}) });
     }
     api.updateScene({ elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { GitBranch, Link2, Plus, Shapes, Type } from 'lucide-react';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, type DiagramSide, type DiagramSystemId } from '../lib/diagram-model';
 import { Modal } from './Modal';
+import { ColorField } from './ColorField';
 
 export type DiagramStyle = {
   fill: string;
@@ -78,10 +79,6 @@ function ShapePreview({ type, doubleOutline }: { type: string; doubleOutline?: b
     {shape}{doubleOutline && inner}
     {type === 'rectangle' && <path d="M17 18h22M17 24h16" opacity=".45" />}
   </svg>;
-}
-
-function colorInputValue(value: string, fallback: string) {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
 export function DiagramPanel(props: DiagramPanelProps) {
@@ -186,20 +183,8 @@ export function DiagramPanel(props: DiagramPanelProps) {
           <summary>Colors &amp; lines <span>{selection}</span></summary>
           <div className="diagram-details-content">
             <div className="diagram-field-grid">
-              {!props.selectedEdge && <div className="diagram-field">
-                <label htmlFor={`${id}-fill`}>Shape fill</label>
-                <div className="diagram-color-field">
-                  <input id={`${id}-fill`} aria-label="Shape fill" type="color" value={colorInputValue(props.style.fill, '#ffffff')} onChange={event => props.onStyleChange({ fill: event.target.value })} />
-                  <button type="button" aria-pressed={props.style.fill === 'transparent'} onClick={() => props.onStyleChange({ fill: 'transparent' })}>No fill</button>
-                </div>
-              </div>}
-              <label className="diagram-field" htmlFor={`${id}-stroke`}>
-                <span>{props.selectedEdge ? 'Line color' : 'Border / line color'}</span>
-                <div className="diagram-color-field">
-                  <input id={`${id}-stroke`} aria-label={props.selectedEdge ? 'Line color' : 'Border / line color'} type="color" value={colorInputValue(props.style.stroke, '#35333b')} onChange={event => props.onStyleChange({ stroke: event.target.value })} />
-                  <span className="diagram-color-value">{props.style.stroke}</span>
-                </div>
-              </label>
+              {!props.selectedEdge && <ColorField label="Shape fill" noneLabel="No background" value={props.style.fill} onChange={fill => props.onStyleChange({ fill })} />}
+              <ColorField label={props.selectedEdge ? 'Line' : 'Border / line'} noneLabel="No stroke" value={props.style.stroke} onChange={stroke => props.onStyleChange({ stroke })} />
               <label className="diagram-field" htmlFor={`${id}-width`}>
                 <span>Line weight</span>
                 <select id={`${id}-width`} aria-label="Line weight" value={props.style.width} onChange={event => props.onStyleChange({ width: Number(event.target.value) })}>
