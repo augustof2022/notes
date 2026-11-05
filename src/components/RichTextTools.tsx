@@ -60,6 +60,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
   }, [api]);
   function start(base: ExcalidrawTextElement, selectAll = false) {
     const data = readRichText(base), container = api.getSceneElements().find(element => element.id === base.containerId);
+    if (base.locked || container?.locked) return;
     const doc = data?.doc || plainRichDoc(base.originalText);
     const deleted = api.getSceneElementsIncludingDeleted().find(element => element.id === base.id)?.isDeleted;
     const state = api.getAppState(), zoom = state.zoom.value;
@@ -158,7 +159,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
       const element = state.editingTextElement;
       if (!input || element?.type !== 'text' || element.locked || state.viewModeEnabled) return;
       const latest = api.getSceneElementsIncludingDeleted().find(item => item.id === element.id);
-      if (latest?.type !== 'text') return;
+      if (latest?.type !== 'text' || latest.locked || api.getSceneElements().some(item => item.id === latest.containerId && item.locked)) return;
       takingOver.current = true;
       try {
         // Close the native editor through its public keyboard behavior. Keeping

@@ -65,7 +65,18 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[], edit
       groupIds: source.groupIds, frameId: source.frameId, locked: true, fileId: render.file.id, isDeleted: false,
       customData: { noteRichTextRender: { ownerId: source.id }, ...(source.customData?.noteDiagram ? { noteDiagram: source.customData.noteDiagram } : {}) } };
     const image = byId.get(id);
-    if (image?.type === 'image') update(image, attrs);
+    if (image?.type === 'image') {
+      update(image, attrs);
+      // Native grouping moves selected text and shapes together, while its
+      // locked SVG preview is not selected. Keep that preview above its owner
+      // instead of leaving it behind the newly grouped shape's fill.
+      const imageIndex = elements.indexOf(image), sourceIndex = elements.indexOf(source);
+      if (imageIndex !== sourceIndex + 1) {
+        elements.splice(imageIndex, 1);
+        elements.splice(elements.indexOf(source) + 1, 0, image);
+        changed = true;
+      }
+    }
     else {
       const [created] = convertToExcalidrawElements([{ id, type: 'image', ...attrs, status: 'saved', scale: [1, 1] }], { regenerateIds: false });
       elements.splice(elements.findIndex(element => element.id === source.id) + 1, 0, created); changed = true;

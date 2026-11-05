@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.12.1**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.13.0**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
@@ -11,6 +11,8 @@ Current release: **v0.12.1**. The app shows the installed version; About → Ver
 - Board snapping: tap **Snap: Off → Elements → Grid → Off** in the canvas controls. Elements shows alignment guides and snaps nearby edges, centers, and spacing while dragging. Grid shows a visible grid and snaps placement to its cells. Tap the adjacent size button to adjust each board’s grid from 1–100 pixels (default 20); the mode and size are saved with the board. Existing items stay in place until moved. Pen strokes remain freehand.
 - Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
 - Persistent object connections: select an ordinary shape, text, image, drawing, line, or icon group and choose **Add connection**. Choose sides and tap a target; its line follows moves and resizes, with the same route, bend, marker, and style controls as diagram connections.
+- Object and group locks protect position, size, shape, and text until unlocked. Labels and diagram outlines lock with their object; locked items remain accessible through **Layers** or **Unlock objects**.
+- A hideable **Layers** sidebar shows objects and expandable groups from front to back, with real previews, search, multi-selection, Group/Ungroup, lock/unlock, and Find on board. Resize its left edge and adjust preview size for a compact overview or larger thumbnails. These controls remain available with the floating toolbars hidden.
 - Hide or restore the left sidebar from the header. Each board toolbar has its own **minus (−)** button. Minimize it directly and use its labeled restore tab to bring it back. Other toolbars stay available. In a board, **Hide tools / Show tools** in the header minimize or restore all four floating toolbars. The labeled **Toolbars** menu controls board actions, drawing tools, navigation tools, and editing tools independently, or hides/restores them together. These visibility preferences stay on the browser; the restore control remains in the header.
 - Move **Board actions** and **Drawing tools** using their dotted grip. Drag the right edge to resize a bar. Both stay on one row; **⋮ More** holds overflow controls, a width slider, **Show button labels**, and **Arrange controls** for changing left-to-right order. Arrow keys move a focused grip or resize handle (Shift for larger steps). Positions, widths, order, and labels stay on this browser across boards and adapt to smaller screens. Reset one from More, or both from **Toolbars → Reset toolbar layouts**.
 - Partial handwriting erasing with an adjustable circular tip, or object erasing for whole strokes, shapes, and images. Press **E** for your saved mode; choose it in **Writing tool settings** under Board actions. Partial erasing preserves untouched and locked content, supports Undo, and ignores native shapes, images, text, and icon stamps.
@@ -71,6 +73,14 @@ Press **T** and tap the board, double-click existing text, or edit a diagram lab
 - Edits autosave while typing. Click elsewhere, **Escape**, or **Ctrl+Enter** to finish. In a diagram label, **Tab** finishes and creates a matching child; **Shift+Tab** creates a sibling. Slash menus take Tab/Enter to choose a command first.
 
 Existing formatted text remains editable. Text stays searchable and keeps its formatting in sync, backups, and PNG exports, including selection exports. Its canvas rendering is generated locally and creates no image uploads or OCR jobs. Common Markdown and GFM are supported; Markdown images remain literal source. Rich text copied from other apps can include tables, code, colors, and checklists.
+
+## Layers and object locks
+
+Open **Layers** in the board header, even when nothing is selected. Use the minus button, Escape, or the header button to hide it. The list scrolls vertically; drag its left edge to resize the sidebar, and use **Preview size** to make thumbnails smaller or larger. A focused resize edge also responds to the arrow keys. Width, preview size, and open/closed preference stay on this browser. On phones, the sidebar overlays part of the canvas and can be hidden whenever you need more drawing space.
+
+Click a row to select its object. Use checkboxes or Ctrl/Cmd-click to select several, or Shift-click for a range. Expand a group to inspect or select individual members. Choose **Group** or **Ungroup**; Ctrl/Cmd G and Ctrl/Cmd Shift G also work on the canvas. Use **Find on board** to locate selected objects without changing them. A shape's label, diagram outline, and formatted text preview share its row.
+
+Use a row's lock icon, the sidebar's **Lock / Unlock** buttons, or **Board actions → Lock selection**. Locking a group locks all its members and labels; locked objects cannot be moved, resized, reshaped, or have their text edited. Selecting a locked row lets you inspect or locate it while its canvas editing handles stay disabled. Unlock the containing group before editing its members. **Board actions → Unlock objects** also restores access without selecting a locked object on the canvas. Locking, grouping, and ungrouping support Undo/Redo, are saved with the board, and sync normally. Formatted text remains visible after grouping; its generated preview stays internally protected when the object is unlocked.
 
 ## Icon stamps
 

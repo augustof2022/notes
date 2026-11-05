@@ -14,6 +14,7 @@ import { DrawingToolbar } from './DrawingToolbar';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
+import { LayersSidebar } from './LayersSidebar';
 import { StampTools } from './StampTools';
 import { WritingTools } from './WritingTools';
 import { RichTextTools, type RichTextHandle } from './RichTextTools';
@@ -175,7 +176,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (!api) return;
     const width = penWidth(value), state = api.getAppState();
     const elements = api.getSceneElementsIncludingDeleted();
-    for (const element of elements) if (element.type === 'freedraw' && !element.isDeleted && state.selectedElementIds[element.id]) {
+    for (const element of elements) if (element.type === 'freedraw' && !element.isDeleted && !element.locked && state.selectedElementIds[element.id]) {
       mutateElement(element, { strokeWidth: width, width: element.width }, false);
     }
     setWidthValue(width);
@@ -297,12 +298,13 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       { id: 'read-text', title: 'Read text', content: <button aria-label="Read text" title="Read text on this board" onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} /><span>Read text</span></button> },
       { id: 'snap', title: 'Snapping', content: <SnapControls controls="mode" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
       { id: 'grid', title: 'Grid size', content: <SnapControls controls="size" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
-      { id: 'diagrams', title: 'Diagrams' }, { id: 'unlock', title: 'Unlock objects' },
+      { id: 'diagrams', title: 'Diagrams' }, { id: 'unlock', title: 'Object locks' },
     ]} />}
     {api && ready && <DrawingToolbar api={api} root={canvasRoot} />}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
+    {api && ready && <LayersSidebar api={api} root={canvasRoot} scope={board.key} onMessage={onMessage} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <RichTextTools ref={richText} api={api} root={canvasRoot} />}
