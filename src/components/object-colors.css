@@ -9,7 +9,15 @@
 .object-color-field .object-color-picker input[type="color"]{width:32px;height:28px;padding:0;border:0;background:transparent;cursor:pointer}
 .object-color-hex{display:flex;gap:8px;align-items:center;margin-top:10px}.object-color-field .object-color-hex input{min-width:0;font-size:12px;padding:8px}.object-color-hex button{padding:8px 10px;min-height:36px;border:1px solid var(--line);border-radius:6px;font-size:11px}
 .color-error{font-size:11px;color:#b45309;margin-top:8px}
-.object-more-colors{margin-bottom:10px}.excalidraw .object-more-colors-button{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:40px;padding:8px;border:1px solid var(--line);border-radius:6px;color:var(--accent);background:var(--accent-light);font:inherit;font-size:11px}
+.object-color-section{position:relative}.excalidraw .object-color-section>h3{padding-right:32px;min-height:24px;display:flex;align-items:center}
+.object-color-more-slot{position:absolute;right:0;top:0}.excalidraw .object-color-more{display:flex;align-items:center;justify-content:center;width:30px;height:24px;padding:0;border:1px solid transparent;border-radius:5px;color:var(--text-primary-color);background:transparent;cursor:pointer}
+.excalidraw .object-color-more:hover,.excalidraw .object-color-more[aria-expanded="true"]{background:var(--button-hover-bg);border-color:var(--default-border-color)}
+.excalidraw .object-color-more:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.excalidraw .object-color-compact{margin:8px 0 0;padding:8px;background:var(--popup-bg-color)}
+.object-color-compact .object-color-custom{margin-top:0;gap:6px}.object-color-compact .object-color-custom>button,.object-color-compact .object-color-picker{flex:1 1 auto;padding:4px 6px;font-size:10px}
+.object-color-compact .object-color-custom{flex-wrap:nowrap}.object-color-compact .object-color-picker>span{display:none}
+.object-color-compact .object-color-hex{gap:4px}.excalidraw .object-color-compact .object-color-hex input{width:0;flex:1;min-height:32px;border:1px solid var(--default-border-color);border-radius:5px;background:var(--island-bg-color);color:var(--text-primary-color)}
+.object-color-compact .object-color-hex button{padding:5px;min-height:32px;color:var(--text-primary-color);background:var(--button-gray-1)}
 .diagram-panel .object-color-field{grid-column:1/-1}.diagram-panel .object-color-swatches{grid-template-columns:repeat(12,minmax(0,1fr))}
 @media(pointer:coarse){.object-color-swatches button{height:32px}.object-color-custom>button,.object-color-picker{min-height:44px}}
 @media(max-width:560px){.object-color-swatches{grid-template-columns:repeat(6,minmax(0,1fr))}.diagram-panel .object-color-swatches{grid-template-columns:repeat(8,minmax(0,1fr))}}

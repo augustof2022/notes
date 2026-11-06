@@ -387,7 +387,10 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const nodeCenter = chosenGeometry && project([chosenGeometry.x + chosenGeometry.width / 2, chosenGeometry.y]);
   const editorTop = (root?.querySelector('.excalidraw')?.getBoundingClientRect().top || bounds?.top || 0) - (bounds?.top || 0);
   const actionHeight = selection.node ? 102 : 52;
-  const actionPosition = nodeCenter && { left: Math.max(8, Math.min((bounds?.width || 400) - 320, nodeCenter[0] - 152)), top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - actionHeight - 16, nodeCenter[1] - actionHeight - 8)) };
+  const properties = root?.querySelector('.excalidraw:not(.excalidraw--mobile) .selected-shape-actions .Island')?.getBoundingClientRect();
+  const maxActionLeft = Math.max(8, (bounds?.width || 400) - 320);
+  const minActionLeft = Math.min(maxActionLeft, properties?.width ? properties.right - (bounds?.left || 0) + 8 : 8);
+  const actionPosition = nodeCenter && { left: Math.max(minActionLeft, Math.min(maxActionLeft, nodeCenter[0] - 152)), top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - actionHeight - 16, nodeCenter[1] - actionHeight - 8)) };
   const source = sourceId && connectionTarget(snapshot.elements, sourceId);
   const start = source ? project(sidePoint(source.geometry, connection.fromSide)) : null;
   const selectedData = selection.node && readDiagramData(selection.node);

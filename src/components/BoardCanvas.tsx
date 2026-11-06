@@ -297,7 +297,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
     {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
-      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'colors', title: 'Stroke and background colors' }, { id: 'text', title: 'Text and formatting' },
+      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'text', title: 'Text and formatting' },
       { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
         setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
