@@ -45,3 +45,6 @@
 .note-rich-content li[data-type=taskItem]>label input{width:.8em;height:.8em;margin:0;padding:0;accent-color:#7c3aed}
 .note-rich-content li[data-type=taskItem]>div{flex:1;min-width:0}
 .note-rich-measure{z-index:-1000;contain:layout style paint}
+.note-jot-bar{position:fixed;z-index:2;pointer-events:auto;display:flex;gap:4px;justify-content:center;max-width:480px;margin:0 auto;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow)}
+.note-jot-bar button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:40px;padding:0 10px;border-radius:8px;color:var(--ink);font-size:13px}
+.note-jot-bar button:active{background:var(--accent-light);color:var(--accent)}

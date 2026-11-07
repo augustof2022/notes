@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.15.0**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.16.0**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
@@ -20,6 +20,8 @@ Current release: **v0.15.0**. The app shows the installed version; About → Ver
 - Draw and hold: pause about650 ms before lifting the pen to preview a clean line, circle/ellipse, square/rectangle, or triangle, then lift to apply. Immediate release preserves ink; uncertain scribbles remain ink. Toggle this in Writing tool settings. Undo restores the original stroke.
 - Touch editing: a pinch whose first finger lands on a selection or its resize handles no longer moves or scales that selection; the accidental change is undone and the selection released so the gesture only pans and zooms. On touch screens, a round **move** button below a selection drags it without resizing, including small labels covered by their resize handles.
 - Typed text wraps at the width you edited it at and its box shrinks to the longest line. Corner-resizing scales the text and its wrap width; dragging a side handle sets a fixed width. Text inside shapes and on connections keeps its container's layout.
+- Find on board: Ctrl+F (or **Find** in Board actions) searches the open board's typed text, shape and connection labels, recognized image text, reviewed handwriting, and erased-text cutouts. Enter and Shift+Enter step through matches in reading order; each match is highlighted, selected when unlocked, and brought into view. The editor's own Find menu entry opens the same panel.
+- Quick notes: while typing a standalone text, Tab starts an indented (child) note below it and Shift+Tab one at the same level. In an empty new note, Tab/Shift+Tab move it in or out a level; Ctrl+] and Ctrl+[ indent any note. Tab inside a list still nests list items. On touch screens a bar above the keyboard offers Below, Child, move left/right a level, and Done. Every note is a separate object.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
 - Nested folders with rename, move, drag into another folder, and recoverable Trash. Library sections have separate New folder and New board actions. Folders and boards sort independently by name (A–Z/Z–A), creation date, or last modification (newest/oldest); choices are remembered on the device and also order the sidebar.
 - Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.

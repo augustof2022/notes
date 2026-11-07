@@ -1,15 +1,18 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { AllSelection, Selection } from '@tiptap/pm/state';
-import { Bold, Italic, Underline, Strikethrough, Link2, Check, X } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link2, Check, X, CornerDownRight, ArrowDownToLine, IndentDecrease, IndentIncrease } from 'lucide-react';
 import { cleanRichDoc, clipboardRichDoc, richTextExtensions, safeTextLink, type RichDoc } from '../lib/rich-text';
 import { diagramShortcutRelation, type DiagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { slashMatch, textCommands, textPopupPosition, type SlashMatch, type TextCommand } from '../lib/text-commands';
 import './rich-text.css';
 
 type Popup = { left: number; top: number };
-export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
+export type JotIndent = 'indent' | 'outdent';
+export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, jot, jotButtons, onJotIndent, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
   doc: RichDoc; fontSize: number; color: string; textAlign: 'left' | 'center' | 'right'; diagram: boolean; selectAll: boolean;
+  /** Standalone text: Tab/Shift+Tab start a new child/sibling note below. */
+  jot: boolean; jotButtons: boolean; onJotIndent: (direction: JotIndent) => void;
   position: Popup; width: number; zoom: number; angle: number; minHeight: number; opacity: number;
   boardBounds: { left: number; top: number; right: number; bottom: number }; onCaretPan: (dx: number, dy: number) => void;
   undoCreation: boolean; onUndoCreation: () => boolean;
@@ -24,7 +27,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   const [link, setLink] = useState<string | null>(null), linkRef = useRef<string | null>(null), [linkError, setLinkError] = useState('');
   const [, refresh] = useState(0);
   const panPending = useRef(false);
-  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation };
+  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot };
   const finish = (relation?: DiagramShortcutRelation, focusCanvas = true) => latest.current.onApply(cleanRichDoc(draft.current), relation, focusCanvas);
   const viewport = () => ({ width: window.visualViewport?.width || innerWidth, height: window.visualViewport?.height || innerHeight, left: window.visualViewport?.offsetLeft || 0, top: window.visualViewport?.offsetTop || 0 });
   function updateControls() {
@@ -103,6 +106,20 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
           if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); command(items[activeRef.current]?.id || items[0].id); return true; }
           if (event.key === 'Escape') { event.preventDefault(); dismissed.current = match.from; slashRef.current = null; setSlash(null); return true; }
         }
+        if (latest.current.jot && !event.altKey) {
+          const current = editorRef.current, plainTab = diagramShortcutRelation(event);
+          // Tab inside a bullet, numbered, or task list still nests list items.
+          if (plainTab && current && !current.isActive('listItem') && !current.isActive('taskItem')) {
+            event.preventDefault(); event.stopPropagation();
+            // An empty new note moves in or out a level; otherwise start the next note.
+            if (current.isEmpty) latest.current.onJotIndent(plainTab === 'sibling' ? 'outdent' : 'indent');
+            else finish(plainTab, false);
+            return true;
+          }
+          if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === ']' || event.key === '[')) {
+            event.preventDefault(); event.stopPropagation(); latest.current.onJotIndent(event.key === ']' ? 'indent' : 'outdent'); return true;
+          }
+        }
         const relation = diagram && diagramShortcutRelation(event);
         if (relation || (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) || event.key === 'Escape') {
           event.preventDefault(); event.stopPropagation(); finish(relation || undefined); return true;
@@ -142,6 +159,13 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
     <div className="note-inline-text-surface" style={{ width, transform: `scale(${zoom})`, clipPath, fontSize, color, opacity, textAlign, minHeight }}>
       <div style={{ transform: `rotate(${angle}rad)`, transformOrigin: 'center center' }}><EditorContent editor={editor} /></div>
     </div>
+    {jot && jotButtons && <div className="note-jot-bar" role="toolbar" aria-label="Add notes" style={{ left: viewport().left + 8, top: viewport().top + viewport().height - 56, width: viewport().width - 16 }} onPointerDown={event => event.preventDefault()}>
+      <button type="button" onClick={() => finish('sibling', false)} title="New note below (Shift+Tab)"><ArrowDownToLine size={16} /><span>Below</span></button>
+      <button type="button" onClick={() => finish('child', false)} title="New indented note (Tab)"><CornerDownRight size={16} /><span>Child</span></button>
+      <button type="button" aria-label="Move left a level" onClick={() => latest.current.onJotIndent('outdent')} title="Move left a level (Ctrl+[)"><IndentDecrease size={16} /></button>
+      <button type="button" aria-label="Move right a level" onClick={() => latest.current.onJotIndent('indent')} title="Move right a level (Ctrl+])"><IndentIncrease size={16} /></button>
+      <button type="button" aria-label="Done" onClick={() => finish(undefined, false)} title="Done"><Check size={16} /></button>
+    </div>}
     {slash && <div className="note-text-commands" role="listbox" aria-label="Text commands" style={{ ...menuPosition, maxHeight: Math.min(300, viewport().height - 24) }} onMouseDown={event => event.preventDefault()}>
       {textCommands(slash.query).map((item, index) => <button role="option" aria-selected={active === index} data-command-active={active === index} key={item.id} onPointerEnter={() => { activeRef.current = index; setActive(index); }} onClick={() => command(item.id)}><span className="note-command-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}
     </div>}

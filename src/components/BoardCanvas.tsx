@@ -3,7 +3,7 @@ import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, exportToB
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText } from 'lucide-react';
+import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText, Search } from 'lucide-react';
 import type { Board, Settings, ViewLock } from '../types';
 import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, repairedSceneElements, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
@@ -16,6 +16,7 @@ import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
 import { LayersSidebar } from './LayersSidebar';
 import { MoveHandle } from './MoveHandle';
+import { BoardFind } from './BoardFind';
 import { ObjectColors } from './ObjectColors';
 import { StampTools } from './StampTools';
 import { WritingTools, type WritingHandle } from './WritingTools';
@@ -305,6 +306,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
         const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
         setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
       }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}<span>{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</span></button> },
+      { id: 'find', title: 'Find on board', content: <button aria-label="Find on board" title="Find text, image text, and handwriting on this board (Ctrl+F)" onClick={() => canvasRoot?.dispatchEvent(new Event('note-board-find'))}><Search size={15} /><span>Find</span></button> },
       { id: 'read-text', title: 'Read text', content: <button aria-label="Read text" title="Read text on this board" onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} /><span>Read text</span></button> },
       { id: 'snap', title: 'Snapping', content: <SnapControls controls="mode" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
       { id: 'grid', title: 'Grid size', content: <SnapControls controls="size" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
@@ -316,6 +318,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
     {api && ready && <LayersSidebar api={api} root={canvasRoot} scope={board.key} onMessage={onMessage} />}
     {api && ready && <MoveHandle api={api} root={canvasRoot} />}
+    {api && ready && <BoardFind api={api} root={canvasRoot} scope={board.scope} zoomLocked={() => !!viewLock.current} />}
     {api && ready && <ObjectColors api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools ref={writing} api={api} root={canvasRoot} onMessage={onMessage} />}

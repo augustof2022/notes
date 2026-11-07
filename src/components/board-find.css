@@ -1,0 +1,20 @@
+.board-find{position:absolute;z-index:9;top:124px;right:12px;width:min(380px,calc(100% - 24px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:13px;overflow:hidden}
+.board-find-bar{display:flex;align-items:center;gap:4px;padding:5px 5px 5px 10px;color:var(--muted)}
+.board-find .board-find-bar input.board-find-input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:16px;padding:6px 4px}
+.board-find-bar button{display:grid;place-items:center;width:32px;height:32px;padding:0;border-radius:7px;color:var(--ink)}
+.board-find-bar button:hover:not(:disabled){background:var(--accent-light);color:var(--accent)}
+.board-find-bar button:disabled{opacity:.35}
+.board-find-count{flex:none;font-size:12px;white-space:nowrap;color:var(--muted)}
+.board-find-results{max-height:min(320px,45vh);overflow-y:auto;border-top:1px solid var(--line);padding:4px}
+.board-find-results button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:7px 8px;border-radius:7px;text-align:left;color:var(--ink)}
+.board-find-results button:hover,.board-find-results button[aria-current=true]{background:var(--accent-light)}
+.board-find-kind{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.board-find-snippet{overflow-wrap:anywhere;line-height:1.35}
+.board-find-snippet mark{background:#ffe066;color:inherit;border-radius:2px;padding:0 1px}
+.board-find-note{margin:6px 8px;font-size:11px;color:var(--muted)}
+.board-find-highlights{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:4}
+.board-find-highlight{position:absolute;border:2px solid #f5b70080;border-radius:6px;background:#ffe06622}
+.board-find-highlight.current{border:2.5px solid #f08c00;background:#ffe06633;box-shadow:0 0 0 4px #f08c0033;animation:board-find-pulse 1.2s ease-out 1}
+@keyframes board-find-pulse{from{box-shadow:0 0 0 14px #f08c0000}to{box-shadow:0 0 0 4px #f08c0033}}
+@media (prefers-reduced-motion:reduce){.board-find-highlight.current{animation:none}}
+@media (max-width:640px){.board-find{top:auto;bottom:96px;left:12px;right:12px;width:auto}}

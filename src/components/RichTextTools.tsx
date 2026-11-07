@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { CaptureUpdateAction, convertToExcalidrawElements, exportToClipboard, mutateElement } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, convertToExcalidrawElements, exportToClipboard, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement, ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { Code, Image, Type } from 'lucide-react';
@@ -8,10 +8,13 @@ import { applyRichText, richTextWidth, selectedText } from '../lib/rich-text-sce
 import { plainRichDoc, readRichText, richDocText, withRichTextRenders, type RichDoc } from '../lib/rich-text';
 import { readDiagramData } from '../lib/diagram-model';
 import type { DiagramShortcutRelation } from '../lib/diagram-shortcuts';
-import { RichTextEditor } from './RichTextEditor';
+import { RichTextEditor, type JotIndent } from './RichTextEditor';
+import { jotIndent, jotPlacement } from '../lib/jot-layout';
+
+const coarsePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
 export interface RichTextHandle { flush(): void; finish(): void; draftElements(): ExcalidrawElement[] | null; hasDraft(): boolean }
-interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; applied: string; width: number; undoCreation: boolean }
+interface Session { base: ExcalidrawTextElement; doc: RichDoc; color: string; selectAll: boolean; diagram: boolean; jot: boolean; applied: string; width: number; undoCreation: boolean }
 export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperativeAPI; root: HTMLDivElement | null }>(function RichTextTools({ api, root }, ref) {
   const [session, setSession] = useState<Session | null>(null), current = useRef<Session | null>(null);
   const [host, setHost] = useState<Element | null>(null);
@@ -70,7 +73,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     if (!base.containerId) width = Math.max(48, Math.min(width, (state.width - 16) / zoom, !data && base.autoResize ? (state.width - left - 16) / zoom : Infinity));
     const targetLeft = Math.max(8, Math.min(left, state.width - width * zoom - 8));
     const undoCreation = !!container && createdNode.current === container.id; createdNode.current = null;
-    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', applied: data && deleted ? '' : JSON.stringify(doc), width, undoCreation };
+    const next = { base: structuredClone(base), doc, color: data?.color || base.strokeColor, selectAll, diagram: readDiagramData(container || base)?.kind === 'node', jot: !base.containerId && !readDiagramData(base), applied: data && deleted ? '' : JSON.stringify(doc), width, undoCreation };
     current.current = next; setEditorHeight(base.height || base.fontSize * 1.35); setSession(next);
     api.updateScene({ appState: { editingTextElement: { ...base, isDeleted: false }, selectedElementIds: {}, selectedGroupIds: {}, openMenu: null, scrollX: state.scrollX + (targetLeft - left) / zoom }, captureUpdate: CaptureUpdateAction.NEVER });
   }
@@ -142,6 +145,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
   function finish(doc: RichDoc, relation?: DiagramShortcutRelation, focusCanvas = true) {
     if (!current.current) return;
     const id = current.current.base.id;
+    if (relation && current.current.jot) { jotNext(doc, relation); return; }
     current.current.doc = doc;
     flushSync(() => {
       saveDraft(); current.current = null; setSession(null);
@@ -150,6 +154,33 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     });
     const canvas = root?.querySelector<HTMLElement>('.excalidraw'); if (focusCanvas) canvas?.focus();
     if (relation) canvas?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: relation === 'sibling', bubbles: true, cancelable: true }));
+  }
+  /** Save this note and immediately start a separate text below it. */
+  function jotNext(doc: RichDoc, relation: DiagramShortcutRelation) {
+    const active = current.current; if (!active) return;
+    active.doc = doc;
+    flushSync(() => {
+      saveDraft();
+      const elements = api.getSceneElements(), saved = elements.find(element => element.id === active.base.id);
+      const source = saved?.type === 'text' ? saved : active.base;
+      const place = jotPlacement(source, relation, elements);
+      const [created] = convertToExcalidrawElements([{ type: 'text', text: '', x: place.x, y: place.y, fontSize: source.fontSize, fontFamily: source.fontFamily,
+        textAlign: 'left', strokeColor: active.color, opacity: source.opacity, groupIds: [...source.groupIds], frameId: source.frameId }]);
+      const base = { ...created, customData: { ...created.customData, noteJot: place.jot } } as ExcalidrawTextElement;
+      current.current = null; setSession(null);
+      api.updateScene({ appState: { editingTextElement: null }, captureUpdate: CaptureUpdateAction.NEVER });
+      start(base);
+    });
+  }
+  function indentNote(direction: JotIndent) {
+    const active = current.current; if (!active?.jot) return;
+    const live = api.getSceneElements().find(element => element.id === active.base.id);
+    const target = live?.type === 'text' ? live : active.base, moved = jotIndent(target, direction === 'indent' ? 1 : -1);
+    if (!moved) return;
+    const customData = { ...target.customData, noteJot: moved.jot };
+    if (live) api.updateScene({ elements: api.getSceneElementsIncludingDeleted().map(element => element.id === live.id ? newElementWith(element, { x: moved.x, customData }) : element), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    const next = { ...active, base: { ...active.base, x: moved.x, customData } as ExcalidrawTextElement };
+    current.current = next; setSession(next);
   }
   useEffect(() => {
     if (!root) return;
@@ -199,7 +230,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
   }
   return <>
     {host && createPortal(<button aria-label="Text and formatting" title="Add text, or format selected text and diagram labels" onClick={formatSelected}><Type size={15} /><span>Format text</span></button>, host)}
-    {session && createPortal(<RichTextEditor key={session.base.id} doc={session.doc} fontSize={session.base.fontSize} color={session.color} opacity={session.base.opacity / 100} textAlign={session.base.textAlign === 'center' ? 'center' : session.base.textAlign === 'right' ? 'right' : 'left'} diagram={session.diagram} selectAll={session.selectAll}
+    {session && createPortal(<RichTextEditor key={session.base.id} doc={session.doc} fontSize={session.base.fontSize} color={session.color} opacity={session.base.opacity / 100} textAlign={session.base.textAlign === 'center' ? 'center' : session.base.textAlign === 'right' ? 'right' : 'left'} diagram={session.diagram} jot={session.jot} jotButtons={coarsePointer()} onJotIndent={indentNote} selectAll={session.selectAll}
       position={{ left: state.offsetLeft + (x + state.scrollX) * state.zoom.value, top: state.offsetTop + (y + state.scrollY) * state.zoom.value }} width={session.width} zoom={state.zoom.value} angle={parent && parent.type !== 'arrow' ? parent.angle : session.base.angle} minHeight={session.base.fontSize * 1.35}
       boardBounds={{ left: state.offsetLeft, top: state.offsetTop, right: state.offsetLeft + state.width, bottom: state.offsetTop + state.height }} onCaretPan={(dx, dy) => { const currentState = api.getAppState(); api.updateScene({ appState: { scrollX: currentState.scrollX + dx / currentState.zoom.value, scrollY: currentState.scrollY + dy / currentState.zoom.value }, captureUpdate: CaptureUpdateAction.NEVER }); }}
       undoCreation={session.undoCreation} onUndoCreation={undoCreation} onHeight={setEditorHeight} onDraft={doc => { if (current.current) { current.current.doc = doc; root?.dispatchEvent(new Event('note-rich-text-change')); } }} onApply={finish} />, document.body)}
