@@ -7,14 +7,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucide-react';
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
-import { askGemini, GEMINI_MODEL, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
+import { askGemini, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
 import { answerMarkdown, askSelection } from '../lib/ask-ai-scene';
 import { jotPlacement } from '../lib/jot-layout';
 import { applyRichText } from '../lib/rich-text-scene';
 import { clipboardRichDoc, readRichText, richDocText } from '../lib/rich-text';
 import './ask-ai.css';
 
-type Dialog = { mode: 'setup' | 'unlock' | 'manage' | 'ask'; message?: string } | { mode: 'error'; message: string; key?: boolean } | null;
+type Dialog = { mode: 'setup' | 'unlock' | 'manage' | 'ask'; message?: string } | { mode: 'error'; message: string; key?: boolean; detail?: string } | null;
 interface Pending { request: AskRequest; anchorId: string | null }
 
 /**
@@ -76,17 +76,17 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const controller = new AbortController(); abort.current = controller;
     try {
       const answer = await askGemini(key, next.request, { signal: controller.signal });
-      placeAnswer(answerMarkdown(answer), next);
+      placeAnswer(answerMarkdown(answer), next, answer.model || 'gemini');
       pending.current = null;
       if (!answer.searched) onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') return;
       const message = error instanceof Error ? error.message : 'Gemini could not answer.';
       if (error instanceof GeminiError && error.kind === 'key') apiKey.current = null;
-      setDialog({ mode: 'error', message, key: error instanceof GeminiError && error.kind === 'key' });
+      setDialog({ mode: 'error', message, key: error instanceof GeminiError && error.kind === 'key', detail: error instanceof GeminiError ? error.detail : '' });
     } finally { if (abort.current === controller) abort.current = null; setAsking(false); }
   }
-  function placeAnswer(markdown: string, next: Pending) {
+  function placeAnswer(markdown: string, next: Pending, model: string) {
     const state = api.getAppState(), elements = api.getSceneElements();
     const anchor = next.anchorId ? elements.find(element => element.id === next.anchorId) : undefined;
     const fontSize = anchor?.type === 'text' ? anchor.fontSize : state.currentItemFontSize || 20;
@@ -95,7 +95,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const doc = clipboardRichDoc(markdown, false), wrap = Math.round(fontSize * 24);
     const color = anchor?.type === 'text' ? readRichText(anchor)?.color || anchor.strokeColor : state.currentItemStrokeColor;
     const [created] = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: place.x, y: place.y, fontSize, fontFamily: anchor?.type === 'text' ? anchor.fontFamily : state.currentItemFontFamily }]);
-    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: { provider: 'gemini', model: GEMINI_MODEL, question: next.request.question.slice(0, 500), at: new Date().toISOString() } } } as ExcalidrawTextElement;
+    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString() } } } as ExcalidrawTextElement;
     applyRichText(text, doc, color, true, { wrap, width: wrap, fontSize });
     api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     requestAnimationFrame(() => api.scrollToContent(text, { fitToContent: false, animate: true }));
@@ -144,6 +144,7 @@ function AskAiDialog({ dialog, sealed, signedIn, pending, onClose, onGoogle, onM
   const rememberBox = <label className="toggle-row ask-ai-remember"><span><strong>Remember on this device</strong><small>Skip the passphrase next time on this browser. Turn off on shared computers.</small></span><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} /></label>;
   if (dialog.mode === 'error') return <Modal title="Ask AI" onClose={onClose}>
     <p className="dialog-description" role="alert">{dialog.message}</p>
+    {dialog.detail && <details className="ask-ai-detail"><summary>Google’s message</summary><p>{dialog.detail}</p></details>}
     <div className="dialog-actions">{dialog.key && <button type="button" className="secondary-button" onClick={() => onMode('setup')}><KeyRound size={14} /> Update key</button>}{google}<button type="button" className="primary-button" onClick={onClose}>Close</button></div>
   </Modal>;
   if (dialog.mode === 'ask') return <Modal title="Ask AI" onClose={onClose} initialFocus="textarea">
