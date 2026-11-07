@@ -1,0 +1,6 @@
+.ask-ai-status{position:absolute;z-index:9;left:50%;bottom:96px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border:1px solid var(--accent);border-radius:999px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:12px}
+.ask-ai-status button{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;color:var(--muted)}
+.ask-ai-status button:hover{background:var(--accent-light);color:var(--accent)}
+.ask-ai-steps{margin:0 0 18px;padding-left:20px;font-size:12px;line-height:1.8;color:var(--ink)}
+.ask-ai-remember{margin-top:0;padding-top:16px}
+.modal textarea{resize:vertical;min-height:70px}

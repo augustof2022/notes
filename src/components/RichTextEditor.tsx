@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { AllSelection, Selection } from '@tiptap/pm/state';
-import { Bold, Italic, Underline, Strikethrough, Link2, Check, X, CornerDownRight, ArrowDownToLine, IndentDecrease, IndentIncrease } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link2, Check, X, CornerDownRight, ArrowDownToLine, IndentDecrease, IndentIncrease, Sparkles } from 'lucide-react';
 import { cleanRichDoc, clipboardRichDoc, richTextExtensions, safeTextLink, type RichDoc } from '../lib/rich-text';
 import { diagramShortcutRelation, type DiagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { slashMatch, textCommands, textPopupPosition, type SlashMatch, type TextCommand } from '../lib/text-commands';
@@ -9,10 +9,12 @@ import './rich-text.css';
 
 type Popup = { left: number; top: number };
 export type JotIndent = 'indent' | 'outdent';
-export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, jot, jotButtons, onJotIndent, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
+export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, jot, jotButtons, onJotIndent, onAsk, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
   doc: RichDoc; fontSize: number; color: string; textAlign: 'left' | 'center' | 'right'; diagram: boolean; selectAll: boolean;
   /** Standalone text: Tab/Shift+Tab start a new child/sibling note below. */
   jot: boolean; jotButtons: boolean; onJotIndent: (direction: JotIndent) => void;
+  /** Save this note, then ask AI about it (Alt+Enter). */
+  onAsk: () => void;
   position: Popup; width: number; zoom: number; angle: number; minHeight: number; opacity: number;
   boardBounds: { left: number; top: number; right: number; bottom: number }; onCaretPan: (dx: number, dy: number) => void;
   undoCreation: boolean; onUndoCreation: () => boolean;
@@ -27,7 +29,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   const [link, setLink] = useState<string | null>(null), linkRef = useRef<string | null>(null), [linkError, setLinkError] = useState('');
   const [, refresh] = useState(0);
   const panPending = useRef(false);
-  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot };
+  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk };
   const finish = (relation?: DiagramShortcutRelation, focusCanvas = true) => latest.current.onApply(cleanRichDoc(draft.current), relation, focusCanvas);
   const viewport = () => ({ width: window.visualViewport?.width || innerWidth, height: window.visualViewport?.height || innerHeight, left: window.visualViewport?.offsetLeft || 0, top: window.visualViewport?.offsetTop || 0 });
   function updateControls() {
@@ -106,6 +108,9 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
           if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); command(items[activeRef.current]?.id || items[0].id); return true; }
           if (event.key === 'Escape') { event.preventDefault(); dismissed.current = match.from; slashRef.current = null; setSlash(null); return true; }
         }
+        if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === 'Enter' && editorRef.current && !editorRef.current.isEmpty) {
+          event.preventDefault(); event.stopPropagation(); finish(undefined, false); latest.current.onAsk(); return true;
+        }
         if (latest.current.jot && !event.altKey) {
           const current = editorRef.current, plainTab = diagramShortcutRelation(event);
           // Tab inside a bullet, numbered, or task list still nests list items.
@@ -164,6 +169,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
       <button type="button" onClick={() => finish('child', false)} title="New indented note (Tab)"><CornerDownRight size={16} /><span>Child</span></button>
       <button type="button" aria-label="Move left a level" onClick={() => latest.current.onJotIndent('outdent')} title="Move left a level (Ctrl+[)"><IndentDecrease size={16} /></button>
       <button type="button" aria-label="Move right a level" onClick={() => latest.current.onJotIndent('indent')} title="Move right a level (Ctrl+])"><IndentIncrease size={16} /></button>
+      <button type="button" aria-label="Ask AI about this note" disabled={!!editor?.isEmpty} onClick={() => { finish(undefined, false); latest.current.onAsk(); }} title="Ask AI (Alt+Enter)"><Sparkles size={16} /></button>
       <button type="button" aria-label="Done" onClick={() => finish(undefined, false)} title="Done"><Check size={16} /></button>
     </div>}
     {slash && <div className="note-text-commands" role="listbox" aria-label="Text commands" style={{ ...menuPosition, maxHeight: Math.min(300, viewport().height - 24) }} onMouseDown={event => event.preventDefault()}>
