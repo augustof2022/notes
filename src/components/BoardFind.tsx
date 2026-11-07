@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CaptureUpdateAction, getCommonBounds } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { ChevronDown, ChevronUp, Image, PenLine, Search, Type, X } from 'lucide-react';
@@ -19,6 +20,8 @@ export function BoardFind({ api, root, scope, zoomLocked }: { api: ExcalidrawImp
   const [imageText, setImageText] = useState<Map<string, string>>(new Map()), [pending, setPending] = useState(0);
   const [revision, setRevision] = useState(0), [, setViewport] = useState('');
   const input = useRef<HTMLInputElement>(null), list = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState<Element | null>(null);
+  useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   const openFind = () => { setOpen(true); requestAnimationFrame(() => { input.current?.focus(); input.current?.select(); }); };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -79,7 +82,8 @@ export function BoardFind({ api, root, scope, zoomLocked }: { api: ExcalidrawImp
     requestAnimationFrame(() => list.current?.querySelector(`[data-find-index="${wrapped}"]`)?.scrollIntoView({ block: 'nearest' }));
   }
   function close() { setOpen(false); root?.querySelector<HTMLElement>('.excalidraw')?.focus(); }
-  if (!open) return null;
+  const trigger = host && createPortal(<button type="button" className="board-header-button board-find-trigger" aria-label="Find on this board" aria-expanded={open} title="Find text, image text, and handwriting (Ctrl+F)" onClick={() => open ? close() : openFind()}><Search size={16} /><span>Find</span></button>, host);
+  if (!open) return trigger;
   const state = api.getAppState(), origin = root?.getBoundingClientRect();
   const rect = (match: BoardFindMatch) => {
     const elements = api.getSceneElements().filter(element => match.targetIds.includes(element.id));
@@ -88,6 +92,7 @@ export function BoardFind({ api, root, scope, zoomLocked }: { api: ExcalidrawImp
     return { left: (x1 + state.scrollX) * z + state.offsetLeft - origin.left - pad, top: (y1 + state.scrollY) * z + state.offsetTop - origin.top - pad, width: (x2 - x1) * z + pad * 2, height: (y2 - y1) * z + pad * 2 };
   };
   return <>
+    {trigger}
     <div className="board-find-highlights" aria-hidden="true">
       {matches.map((match, position) => { const box = rect(match); return box && <span key={match.key} className={position === index ? 'board-find-highlight current' : 'board-find-highlight'} style={box} />; })}
     </div>

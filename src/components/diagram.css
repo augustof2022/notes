@@ -9,11 +9,6 @@
 .diagram-operation>span{flex-basis:100%;line-height:1.5}.diagram-operation label{display:flex;flex-direction:row;align-items:center;gap:5px;margin:0}.diagram-operation select{padding:6px;font-size:12px;width:auto;min-height:40px}.diagram-operation button{padding:8px;border-radius:6px;color:var(--accent);min-height:40px}
 .diagram-connection-preview{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:hidden}.diagram-connection-preview path{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:6 5}
 @media(max-width:760px){.diagram-quick-actions button{min-height:44px;padding:6px;font-size:10px}.diagram-operation select{font-size:16px}}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools:has(.diagram-mode-button){grid-template-columns:repeat(3,minmax(0,1fr))}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools:has(.diagram-mode-button) button{padding:9px 6px;gap:4px}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.diagram-mode-button{order:-1}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools:has(.diagram-mode-button)>.snap-mode-button{grid-column:span 2}
-@media(min-width:560px){.board-canvas:has(>.excalidraw--mobile)>.canvas-tools:has(.diagram-mode-button){grid-template-columns:repeat(5,auto)}.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.diagram-mode-button{order:0}.board-canvas:has(>.excalidraw--mobile)>.canvas-tools:has(.diagram-mode-button)>.snap-mode-button{grid-column:auto}}
 
 .diagram-panel-layer .modal {
   width: 640px;

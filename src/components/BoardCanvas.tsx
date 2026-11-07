@@ -3,14 +3,12 @@ import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, exportToB
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ImagePlus, Loader2, LockKeyhole, UnlockKeyhole, ScanText, Search } from 'lucide-react';
+import { ImagePlus, Loader2 } from 'lucide-react';
 import type { Board, Settings, ViewLock } from '../types';
 import { constantInkUpdates, DEFAULT_PEN_WIDTH, penWidth, repairedSceneElements, stickyTextTool, viewLockCorrection } from '../lib/canvas-behavior';
 import { ReadTextDialog } from './ReadTextDialog';
 import { PenWidthPanel } from './PenWidthPanel';
-import { SnapControls } from './SnapControls';
-import { FloatingToolbar } from './FloatingToolbar';
-import { DrawingToolbar } from './DrawingToolbar';
+import { BoardToolbar } from './BoardToolbar';
 import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snapping';
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
@@ -43,6 +41,8 @@ export interface CanvasHandle {
   jumpTo: (elementId: string) => void;
   reloadImages: () => Promise<void>;
   toggleControls: () => void;
+  toolbarsHidden: () => boolean;
+  readText: () => void;
 }
 function cleanAppState(state: AppState): Board['appState'] {
   return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, viewBackgroundColor: state.viewBackgroundColor,
@@ -194,6 +194,11 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     setWidthValue(width);
     api.updateScene({ elements, appState: { currentItemStrokeWidth: width }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   }
+  function toggleZoomLock() {
+    if (!api) return;
+    const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
+    setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
+  }
   function changeSnapping(mode: SnapMode, size = api?.getAppState().gridSize) {
     api?.updateScene({ appState: snapState(mode, size), captureUpdate: CaptureUpdateAction.NEVER });
   }
@@ -204,6 +209,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   }
   useImperativeHandle(ref, () => ({ flush, jumpTo, hasPendingChanges,
     toggleControls: () => chrome.current?.toggle(),
+    toolbarsHidden: () => !!chrome.current?.hidden(),
+    readText: () => { void flush().then(() => setReading(true)).catch(() => {}); },
     reloadImages,
     exportPng: async () => {
       richText.current?.finish();
@@ -301,20 +308,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     <Excalidraw excalidrawAPI={setApi} initialData={initialData} onChange={changed} theme={settings.theme}
       name={board.name} autoFocus={true} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: true, export: false, toggleTheme: false } }} />
     {empty && api && ready && <div className="canvas-welcome" aria-hidden="true"><div className="welcome-icon"><ImagePlus size={25} /></div><h2>Start anywhere.</h2><p>Paste a screenshot. Type a thought. Draw a connection.</p><span><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · <kbd>T</kbd> to type · <kbd>Space</kbd> + drag to pan</span></div>}
-    {api && ready && <FloatingToolbar group="actions" title="Board actions" root={canvasRoot} items={[
-      { id: 'stamps', title: 'Icon stamps' }, { id: 'writing', title: 'Writing tools' }, { id: 'text', title: 'Text and formatting' },
-      { id: 'zoom-lock', title: 'Zoom lock', content: <button aria-label={viewLocked ? 'Unlock zoom' : 'Lock zoom'} aria-pressed={viewLocked} onClick={() => {
-        const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
-        setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
-      }} title="Keep the zoom percentage fixed while still moving around the board">{viewLocked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}<span>{viewLocked ? 'Unlock zoom' : 'Lock zoom'}</span></button> },
-      { id: 'find', title: 'Find on board', content: <button aria-label="Find on board" title="Find text, image text, and handwriting on this board (Ctrl+F)" onClick={() => canvasRoot?.dispatchEvent(new Event('note-board-find'))}><Search size={15} /><span>Find</span></button> },
-      { id: 'ask-ai', title: 'Ask AI' },
-      { id: 'read-text', title: 'Read text', content: <button aria-label="Read text" title="Read text on this board" onClick={() => { void flush().then(() => setReading(true)).catch(() => {}); }}><ScanText size={15} /><span>Read text</span></button> },
-      { id: 'snap', title: 'Snapping', content: <SnapControls controls="mode" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
-      { id: 'grid', title: 'Grid size', content: <SnapControls controls="size" mode={snapMode(snapping)} size={snapping.gridSize} onModeChange={mode => changeSnapping(mode)} onSizeChange={size => changeSnapping(snapMode(api.getAppState()), size)} /> },
-      { id: 'diagrams', title: 'Diagrams' }, { id: 'unlock', title: 'Object locks' },
-    ]} />}
-    {api && ready && <DrawingToolbar api={api} root={canvasRoot} />}
+    {api && ready && <BoardToolbar api={api} root={canvasRoot} zoomLocked={viewLocked} onZoomLock={toggleZoomLock}
+      snapMode={snapMode(snapping)} gridSize={snapping.gridSize} onSnapMode={mode => changeSnapping(mode)} onGridSize={size => changeSnapping(snapMode(api.getAppState()), size)}
+      onReadText={() => { void flush().then(() => setReading(true)).catch(() => {}); }} onHideToolbars={() => canvasRoot?.dispatchEvent(new Event('note-hide-toolbars'))} />}
     <PenWidthPanel root={canvasRoot} enabled={showPenWidth} value={widthValue} onChange={changePenWidth} />
     {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}

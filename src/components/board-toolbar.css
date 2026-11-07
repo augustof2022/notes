@@ -1,0 +1,98 @@
+/* One tool bar replaces the editor's own shape bar, library button, and the
+   mobile side panel. The editor keeps its properties panel, menu, zoom, and
+   undo/redo, which are already organized by the editor. */
+.board-canvas .excalidraw .shapes-section,
+.board-canvas .excalidraw .App-toolbar--mobile,
+.board-canvas .excalidraw .HintViewer,
+.board-canvas .excalidraw .default-sidebar-trigger,
+.board-canvas .excalidraw .mobile-misc-tools-container{display:none!important}
+
+.note-toolbar{position:absolute;z-index:6;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;max-width:calc(100% - 16px);padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 6px 20px #3730440f;box-sizing:border-box}
+.board-canvas:has(>.excalidraw--mobile)>.note-toolbar{top:8px}
+.note-toolbar-sep{flex:none;width:1px;height:22px;margin:0 4px;background:var(--line)}
+.note-toolbar-slot{display:flex;align-items:center}
+.note-toolbar-slot:empty,.note-toolbar[data-compact="true"] .note-wide-only{display:none!important}
+
+/* Every control in the bar is an icon button of the same size. */
+.note-toolbar .note-tool,
+.note-toolbar .note-toolbar-slot:not(.note-menu-slot) button{display:inline-grid;place-items:center;flex:none;width:38px;min-width:38px;height:38px;min-height:38px;margin:0;padding:0;border:0;border-radius:8px;background:transparent;color:var(--ink);cursor:pointer;font:inherit}
+.note-toolbar .note-tool:hover,.note-toolbar .note-toolbar-slot:not(.note-menu-slot) button:hover,.note-toolbar .note-split-more:hover{background:var(--accent-light)}
+.note-toolbar .note-tool[aria-pressed="true"],.note-toolbar .note-toolbar-slot:not(.note-menu-slot) button[aria-pressed="true"],.note-toolbar .note-tool[aria-expanded="true"]{background:var(--accent-light);color:var(--accent)}
+.note-toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.note-toolbar .note-toolbar-slot:not(.note-menu-slot) button>span:not(.icon-stamp-glyph),.note-toolbar .note-toolbar-slot:not(.note-menu-slot) button>kbd{display:none}
+
+/* Tools with a menu: the main button picks the tool, the small chevron opens options. */
+.note-split,.note-more{position:relative;display:flex;align-items:center}
+.note-toolbar .note-split-more,
+.note-toolbar .note-toolbar-slot .ink-settings-trigger,
+.note-toolbar .note-toolbar-slot .icon-stamp-picker-trigger{width:18px!important;min-width:18px!important;padding:0!important;border:0!important;border-radius:6px!important;margin-left:-2px!important;color:var(--muted)!important;background:transparent}
+.note-toolbar .note-split-more{display:inline-grid;place-items:center;height:38px;cursor:pointer}
+.note-toolbar .ink-tools,.note-toolbar .icon-stamp-tool{display:flex;align-items:center;gap:0;border:0;padding:0;margin:0;background:none}
+.note-toolbar .icon-stamp-glyph{display:inline-flex}
+
+/* Menus */
+.note-popover{position:absolute;z-index:20;top:calc(100% + 10px);left:-4px;display:flex;flex-direction:column;gap:1px;min-width:200px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 12px 32px #2a22381f;visibility:hidden;opacity:0;transform:translateY(-4px);transition:opacity .12s ease,transform .12s ease,visibility 0s .12s;pointer-events:none}
+.note-popover[data-open="true"]{visibility:visible;opacity:1;transform:none;transition:opacity .12s ease,transform .12s ease;pointer-events:auto}
+.note-more-panel{left:auto;right:-4px;width:280px;max-width:calc(100vw - 24px);max-height:calc(100vh - 160px);overflow-y:auto;overscroll-behavior:contain}
+.note-menu-heading{margin:10px 10px 4px;font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.note-menu-heading:first-child{margin-top:4px}
+.note-toolbar .note-menu-item,.note-toolbar .note-menu-slot button,.note-toolbar .note-grid-size button{display:flex;align-items:center;gap:10px;width:100%;min-height:38px;margin:0;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:400 13px 'DM Sans',sans-serif;text-align:left;cursor:pointer}
+.note-toolbar .note-menu-item:hover,.note-toolbar .note-menu-slot button:hover,.note-toolbar .note-grid-size button:hover{background:var(--accent-light)}
+.note-toolbar .note-menu-item[aria-pressed="true"]{color:var(--accent);background:var(--accent-light)}
+.note-toolbar .note-menu-item svg,.note-toolbar .note-menu-slot svg,.note-toolbar .note-grid-size svg{flex:none;color:var(--muted)}
+.note-toolbar .note-menu-item[aria-pressed="true"] svg{color:var(--accent)}
+.note-toolbar .note-menu-item>span{flex:1}
+.note-toolbar .note-menu-item kbd{margin-left:auto}
+.note-menu-slot{flex-direction:column;align-items:stretch}
+.note-grid-size button::before{content:'Grid size';flex:1;order:1}
+.note-grid-size button>span{order:2;color:var(--muted);font-size:12px}
+.note-grid-size button>svg{order:0}
+.note-segmented{display:flex;align-items:center;gap:2px;padding:4px 4px 4px 10px;font-size:13px}
+.note-segmented>span{display:flex;align-items:center;gap:10px;flex:1}
+.note-segmented>span svg{color:var(--muted)}
+.note-segmented button{min-height:30px;padding:4px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:400 12px 'DM Sans',sans-serif;cursor:pointer}
+.note-segmented button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-light);color:var(--accent)}
+@media(pointer:coarse){.note-toolbar .note-menu-item,.note-toolbar .note-menu-slot button,.note-toolbar .note-grid-size button{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.note-popover{transition:none}}
+
+/* Step aside for the editor's dialogs, the mobile properties sheet, and diagram palettes. */
+.board-canvas[data-editor-overlay="true"]>.note-toolbar,
+.board-canvas:has(.excalidraw--mobile .App-mobile-menu .panelColumn)>.note-toolbar,
+.board-canvas.diagram-panel-open>.note-toolbar{visibility:hidden;pointer-events:none}
+.board-canvas .excalidraw--mobile .App-menu_top__left{top:60px}
+
+/* Hidden toolbars (focus mode). */
+.board-canvas[data-toolbars="hidden"]>.note-toolbar,
+.board-canvas[data-toolbars="hidden"] .excalidraw .App-menu_top__left,
+.board-canvas[data-toolbars="hidden"] .excalidraw .layer-ui__wrapper__footer-left,
+.board-canvas[data-toolbars="hidden"] .excalidraw .layer-ui__wrapper__footer-right,
+.board-canvas[data-toolbars="hidden"] .excalidraw .App-bottom-bar,
+.board-canvas[data-toolbars="hidden"] .excalidraw .selected-shape-actions,
+.board-canvas[data-toolbars="hidden"]>.diagram-quick-actions,
+.board-canvas[data-toolbars="hidden"] .note-pen-width-slot{display:none!important}
+.note-toolbars-restore{position:absolute;z-index:6;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font:500 12px 'DM Sans',sans-serif;cursor:pointer}
+.note-toolbars-restore:hover{background:var(--accent-light);color:var(--accent)}
+
+/* Header tools for the open board: Find, Ask AI, Layers. */
+.board-header-tools{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.board-find-trigger{order:1}.ask-ai-tools{order:2}.layers-toggle{order:3}
+.board-header-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:6px 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink);font:500 12px 'DM Sans',sans-serif;white-space:nowrap;cursor:pointer}
+.board-header-button:hover,.board-header-button[aria-expanded="true"]{background:var(--accent-light);color:var(--accent)}
+.board-header-button:disabled{opacity:.6}
+.board-header-split{display:flex;align-items:center}
+.board-header-split>.board-header-button:first-child{padding-right:4px}
+.board-header-split>.board-header-chevron{min-width:22px;padding:6px 3px;color:var(--muted)}
+.topbar:has(.board-header-tools) .app-version,.topbar:has(.board-header-tools) .sync-details-trigger{display:none}
+.item-menu hr{border:0;border-top:1px solid var(--line);margin:5px 4px}
+.item-menu .item-menu-footer{display:block;padding:8px 9px 4px;font-size:10px;color:var(--muted);text-decoration:none}
+.item-menu .item-menu-footer:hover{color:var(--accent)}
+@media(max-width:760px){
+  .board-header-tools{gap:0}
+  .board-header-button>span,.board-header-chevron{display:none!important}
+  .board-header-button{min-width:40px;min-height:40px;padding:8px}
+  .topbar:has(.board-header-tools) .breadcrumbs>button,.topbar:has(.board-header-tools) .breadcrumbs>span:not(:last-child){display:none}
+  .topbar:has(.board-header-tools) .breadcrumbs>span:last-child>svg{display:none}
+  .topbar:has(.board-header-tools) .breadcrumbs .breadcrumb-current{max-width:none;font-size:13px}
+  .topbar:has(.board-header-tools) .breadcrumbs{min-width:0;flex:1}
+  .topbar:has(.board-header-tools) .topbar-left{flex:1;min-width:0}
+}

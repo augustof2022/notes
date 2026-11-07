@@ -54,26 +54,15 @@
 .icon-stamp-footer .primary-button{max-width:100%;white-space:normal;text-align:center}
 .icon-stamp-footer .primary-button>span{display:flex;align-items:center;flex-shrink:0}
 
-/* The selected marker remains visible beside the picker, including on mobile. */
-.canvas-tools>.icon-stamp-tool{display:flex;align-items:stretch;min-width:0;border:1px solid transparent;border-radius:7px}
-.board-canvas .floating-toolbar .icon-stamp-tool{display:flex;align-items:center;gap:0;min-width:0;width:max-content}
-.board-canvas .floating-toolbar[data-labels="false"] .floating-toolbar-items .icon-stamp-trigger>.icon-stamp-glyph{display:inline-flex}
-.board-canvas .floating-toolbar .floating-toolbar-overflow .icon-stamp-tool{width:100%}
-.canvas-tools>.icon-stamp-tool:has(.icon-stamp-trigger[aria-pressed="true"]){border-color:var(--accent);background:var(--accent-light)}
-.canvas-tools .icon-stamp-trigger{min-width:0;max-width:190px;gap:6px}
-.canvas-tools .icon-stamp-trigger[aria-pressed="true"]{border-radius:6px 0 0 6px}
 .icon-stamp-glyph{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:20px;height:20px}
 .icon-stamp-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.canvas-tools .icon-stamp-picker-trigger{padding-right:7px;padding-left:7px;min-width:38px;border-left:1px solid var(--line);border-radius:0 6px 6px 0}
+
 .icon-stamp-preview{position:absolute;pointer-events:none;z-index:8;display:grid;place-items:center;opacity:.65;transform:translate(-50%,-50%)}
 .icon-stamp-hint{position:absolute;left:50%;bottom:76px;transform:translateX(-50%);z-index:8;display:flex;align-items:center;justify-content:center;gap:10px;width:max-content;max-width:calc(100% - 24px);padding:8px 12px;background:var(--panel);border:1px solid var(--accent);border-radius:8px;box-shadow:var(--shadow);font-size:11px;line-height:1.5}
 .icon-stamp-hint>span{min-width:0}
 .icon-stamp-hint button,.icon-stamp-stop{min-width:44px;min-height:44px;color:var(--accent);padding:5px;border-radius:6px}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.icon-stamp-tool{grid-column:span 2}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools .icon-stamp-trigger{flex:1;max-width:none}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools .icon-stamp-picker-trigger{min-width:44px;flex-shrink:0}
+
 .board-canvas:has(>.excalidraw--mobile)>.icon-stamp-hint{bottom:84px}
-@media(min-width:560px){.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.icon-stamp-tool{grid-column:auto}}
 @media(max-width:560px){
   .icon-stamp-picker-layer .modal-backdrop{padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}
   .icon-stamp-picker-layer .modal{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));padding:14px 14px 17px}

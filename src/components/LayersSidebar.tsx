@@ -17,7 +17,7 @@ export function LayersSidebar({ api, root, scope, onMessage }: { api: Excalidraw
   const lastSelection = useRef(''), rangeAnchor = useRef<string | undefined>(undefined), list = useRef<HTMLDivElement>(null), aside = useRef<HTMLElement>(null);
   const resizeCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => resizeCleanup.current?.(), []);
-  useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-chrome-quick-slot') || null); setParent(root?.parentElement || null); }, [root]);
+  useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); setParent(root?.parentElement || null); }, [root]);
   useLayoutEffect(() => { parent?.classList.toggle('layers-open', preferences.open); return () => parent?.classList.remove('layers-open'); }, [parent, preferences.open]);
   function update(patch: Partial<LayerPreferences>) {
     setPreferences(previous => { const next = { ...previous, ...patch }; preferencesRef.current = next; saveLayerPreferences(next); return next; });
@@ -127,7 +127,7 @@ export function LayersSidebar({ api, root, scope, onMessage }: { api: Excalidraw
   const descendants = new Set(chosen.flatMap(object => object.elementIds));
   const sameParent = chosen.length > 0 && chosen.every(object => object.parentGroupId === chosen[0].parentGroupId);
   return <>
-    {host && createPortal(<button className="layers-toggle board-chrome-quick-toggle" aria-label={preferences.open ? 'Hide layers' : 'Show layers'} aria-expanded={preferences.open} aria-controls="board-layers" onClick={() => preferences.open ? hide() : update({ open: true })}><Layers size={16} /><span>Layers</span></button>, host)}
+    {host && createPortal(<button className="layers-toggle board-header-button" aria-label={preferences.open ? 'Hide layers' : 'Show layers'} aria-expanded={preferences.open} aria-controls="board-layers" onClick={() => preferences.open ? hide() : update({ open: true })}><Layers size={16} /><span>Layers</span></button>, host)}
     {preferences.open && parent && createPortal(<aside id="board-layers" className="layers-sidebar" ref={aside} aria-label="Board layers" onKeyDownCapture={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hide(); } }} style={{ '--layers-width': `${preferences.width}px`, '--layer-tile': `${preferences.tileSize}px` } as CSSProperties}>
       <div className="layers-resize" role="separator" tabIndex={0} title="Drag the left edge to adjust width. Arrow keys also resize." aria-label="Layers sidebar width" aria-orientation="vertical" aria-valuemin={240} aria-valuemax={520} aria-valuenow={preferences.width} onPointerDown={resize} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); update({ width: Math.max(240, Math.min(520, preferences.width + (event.key === 'ArrowLeft' ? 16 : -16))) }); } }} />
       <header className="layers-heading"><Layers size={17} /><h2>Layers</h2><span>{objects.length}</span><button aria-label="Hide layers sidebar" title="Minimize layers" onClick={hide}><Minus size={18} /></button></header>

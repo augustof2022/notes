@@ -1,5 +1,5 @@
 .icon-stamp-controls{display:flex;align-items:center;border-left:1px solid var(--line);padding-left:4px}
-.canvas-tools .icon-stamp-trigger{gap:6px}.canvas-tools .icon-stamp-picker-trigger{padding-left:7px;padding-right:7px;min-width:32px}
+
 .icon-stamp-trigger kbd{font-size:9px}.icon-stamp-trigger>span{max-width:95px;overflow:hidden;text-overflow:ellipsis}
 .icon-stamp-search{display:flex;flex-direction:row;align-items:center;gap:10px;color:var(--muted);margin:0 0 14px}
 .icon-stamp-search input{min-width:0;flex:1}
@@ -20,9 +20,9 @@
 .icon-stamp-preview>span{flex:1}.icon-stamp-preview strong{font-size:13px}.icon-stamp-preview small{display:block;font-size:11px;color:var(--muted);margin-top:4px}
 .icon-stamp-status{position:absolute;z-index:4;bottom:82px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;max-width:calc(100% - 24px);padding:9px 12px;background:var(--panel);border:1px solid var(--accent);border-radius:9px;box-shadow:var(--shadow);font-size:12px}
 .icon-stamp-status>svg{flex-shrink:0}.icon-stamp-status>span{line-height:1.5}.icon-stamp-status button{display:grid;place-items:center;min-width:32px;min-height:32px;border-radius:6px}
-.board-canvas:has(>.excalidraw--mobile)>.canvas-tools>.icon-stamp-controls{grid-column:1/-1;justify-content:center;border-left:0;border-top:1px solid var(--line);padding:4px 0 0}
+
 .board-canvas:has(>.excalidraw--mobile)>.icon-stamp-status{bottom:80px;font-size:11px}
-.board-canvas[data-chrome-actions="false"][data-chrome-editing="false"]>.icon-stamp-status{bottom:20px}
+
 @media(max-width:560px){.icon-stamp-grid{grid-template-columns:repeat(3,minmax(0,1fr));max-height:30dvh}.icon-stamp-grid button{padding:10px 5px;min-height:100px}.icon-stamp-colors button,.icon-stamp-colors input{width:32px;height:32px}.icon-stamp-settings{gap:12px}.icon-stamp-status{width:max-content}}
 .modal:has(.icon-stamp-picker-body){display:flex;flex-direction:column;overflow:hidden}
 .modal:has(.icon-stamp-picker-body)>.modal-heading,.modal:has(.icon-stamp-picker-body)>.dialog-actions{flex-shrink:0}

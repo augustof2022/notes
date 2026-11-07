@@ -1,23 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BOARD_CHROME_DEFAULTS, readBoardChrome, saveBoardChrome } from './board-chrome';
+import { readToolbarsHidden, saveToolbarsHidden } from './board-chrome';
 
 afterEach(() => vi.unstubAllGlobals());
+const storage = (values: Record<string, string>) => vi.stubGlobal('localStorage', { getItem: (key: string) => values[key] ?? null, setItem: (key: string, value: string) => { values[key] = value; } });
 
-describe('board toolbar preferences', () => {
-  it('remembers hidden groups while treating invalid or new preferences as visible', () => {
-    let saved = JSON.stringify({ actions: false, drawing: false, navigation: 'false', unrelated: true });
-    vi.stubGlobal('localStorage', { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } });
-    expect(readBoardChrome()).toEqual({ actions: false, drawing: false, navigation: true, editing: true });
-    const hidden = { actions: false, drawing: false, navigation: false, editing: false };
-    saveBoardChrome(hidden);
-    expect(readBoardChrome()).toEqual(hidden);
-    saved = 'not valid JSON';
-    expect(readBoardChrome()).toEqual(BOARD_CHROME_DEFAULTS);
+describe('hidden board toolbars', () => {
+  it('remembers the choice and carries over a fully hidden layout from older versions', () => {
+    const values: Record<string, string> = {}; storage(values);
+    expect(readToolbarsHidden()).toBe(false);
+    saveToolbarsHidden(true); expect(readToolbarsHidden()).toBe(true);
+    storage({ 'note-board-toolbars': JSON.stringify({ actions: false, drawing: false, navigation: false, editing: false }) });
+    expect(readToolbarsHidden()).toBe(true);
+    storage({ 'note-board-toolbars': JSON.stringify({ actions: false, drawing: true }) });
+    expect(readToolbarsHidden()).toBe(false);
   });
 
-  it('keeps controls usable when browser storage is blocked', () => {
+  it('keeps toolbars visible when browser storage is blocked', () => {
     vi.stubGlobal('localStorage', { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } });
-    expect(readBoardChrome()).toEqual(BOARD_CHROME_DEFAULTS);
-    expect(() => saveBoardChrome({ ...BOARD_CHROME_DEFAULTS, editing: false })).not.toThrow();
+    expect(readToolbarsHidden()).toBe(false);
+    expect(() => saveToolbarsHidden(true)).not.toThrow();
   });
 });

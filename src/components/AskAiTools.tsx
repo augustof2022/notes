@@ -28,7 +28,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   const [sealed, setSealed] = useState<SealedAiKey | null | undefined>(undefined);
   const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null);
   const signedIn = !!client && owner !== 'local';
-  useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-ask-ai"]') || null); }, [root]);
+  useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
     root?.addEventListener('note-ask-ai', request);
@@ -112,10 +112,10 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   }
 
   return <>
-    {host && createPortal(<div className="ink-tools ask-ai-tools">
-      <button className="ink-eraser-main" aria-label="Ask AI about the selected note" title="Ask AI about the selected note or picture (Alt+Enter while typing)" disabled={asking} onClick={() => { void start(); }}>
+    {host && createPortal(<div className="board-header-split ask-ai-tools">
+      <button className="board-header-button" aria-label="Ask AI about the selected note" title="Ask AI about the selected note or picture (Alt+Enter while typing)" disabled={asking} onClick={() => { void start(); }}>
         {asking ? <Loader2 className="spinning" size={16} /> : <Sparkles size={16} />}<span>Ask AI</span></button>
-      <button className="ink-settings-trigger" aria-label="Ask AI settings" aria-haspopup="dialog" onClick={() => { pending.current = null; void currentSealed().catch(() => undefined); setDialog({ mode: 'manage' }); }}><ChevronDown size={14} /></button>
+      <button className="board-header-button board-header-chevron" aria-label="Ask AI settings" aria-haspopup="dialog" onClick={() => { pending.current = null; void currentSealed().catch(() => undefined); setDialog({ mode: 'manage' }); }}><ChevronDown size={14} /></button>
     </div>, host)}
     {asking && <div className="ask-ai-status" role="status"><Loader2 className="spinning" size={15} /> Asking Gemini… <button type="button" aria-label="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></div>}
     {dialog && createPortal(<AskAiDialog dialog={dialog} sealed={sealed} signedIn={signedIn} pending={pending.current}

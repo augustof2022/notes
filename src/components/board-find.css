@@ -1,4 +1,4 @@
-.board-find{position:absolute;z-index:9;top:124px;right:12px;width:min(380px,calc(100% - 24px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:13px;overflow:hidden}
+.board-find{position:absolute;z-index:9;top:66px;right:12px;width:min(380px,calc(100% - 24px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:13px;overflow:hidden}
 .board-find-bar{display:flex;align-items:center;gap:4px;padding:5px 5px 5px 10px;color:var(--muted)}
 .board-find .board-find-bar input.board-find-input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:16px;padding:6px 4px}
 .board-find-bar button{display:grid;place-items:center;width:32px;height:32px;padding:0;border-radius:7px;color:var(--ink)}

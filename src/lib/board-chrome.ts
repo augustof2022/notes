@@ -1,24 +1,20 @@
-export type BoardChromeGroup = 'actions' | 'drawing' | 'navigation' | 'editing';
-export type BoardChromeVisibility = Record<BoardChromeGroup, boolean>;
+const STORAGE_KEY = 'note-board-toolbars-hidden';
+const LEGACY_KEY = 'note-board-toolbars';
 
-const STORAGE_KEY = 'note-board-toolbars';
-export const BOARD_CHROME_DEFAULTS: BoardChromeVisibility = { actions: true, drawing: true, navigation: true, editing: true };
-
-export function readBoardChrome(): BoardChromeVisibility {
-  const next = { ...BOARD_CHROME_DEFAULTS };
+/**
+ * Whether board toolbars are hidden on this browser. Earlier versions saved
+ * four separate toolbar groups; hiding all of them now means hidden.
+ */
+export function readToolbarsHidden(): boolean {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
-      for (const group of Object.keys(next) as BoardChromeGroup[]) {
-        const value = (saved as Record<string, unknown>)[group];
-        if (typeof value === 'boolean') next[group] = value;
-      }
-    }
-  } catch { /* Toolbars remain usable when browser storage is unavailable. */ }
-  return next;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved !== null) return saved === 'true';
+    const legacy: unknown = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null');
+    return !!legacy && typeof legacy === 'object' && !Array.isArray(legacy) && Object.values(legacy).length > 0 && Object.values(legacy).every(value => value === false);
+  } catch { return false; }
 }
 
-export function saveBoardChrome(visibility: BoardChromeVisibility): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility)); }
-  catch { /* The current layout still applies without persistent storage. */ }
+export function saveToolbarsHidden(hidden: boolean): void {
+  try { localStorage.setItem(STORAGE_KEY, String(hidden)); }
+  catch { /* The current choice still applies without persistent storage. */ }
 }
