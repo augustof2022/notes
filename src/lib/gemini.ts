@@ -75,5 +75,14 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
   }
 }
 
+/** Confirm Google accepts a key before saving it; a lightweight model listing, no generation. */
+export async function verifyGeminiKey(apiKey: string, fetcher: typeof fetch = fetch): Promise<'ok' | 'offline'> {
+  let response: Response;
+  try { response = await fetcher(`${ENDPOINT}?pageSize=1`, { headers: { 'x-goog-api-key': apiKey.trim() } }); }
+  catch { return 'offline'; }
+  if (response.ok) return 'ok';
+  throw failure(response.status, await response.json().catch(() => null));
+}
+
 /** Free fallback: Google Search AI Mode with the question filled in (opens a new tab). */
 export const googleAiModeUrl = (question: string) => `https://www.google.com/search?udm=50&q=${encodeURIComponent(question.trim().slice(0, 1800))}`;

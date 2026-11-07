@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { looksLikeGeminiKey, sealAiKey, unlockAiKey, WrongPassphraseError } from './ai-key';
+import { geminiKeyProblem, sealAiKey, unlockAiKey, WrongPassphraseError } from './ai-key';
 
 const KEY = 'AIzaSyD-example_key_value_1234567890abcd';
 
@@ -17,7 +17,10 @@ it('rejects a wrong passphrase and uses a fresh salt and IV every time', async (
   expect(first.salt).not.toBe(second.salt); expect(first.iv).not.toBe(second.iv); expect(first.ciphertext).not.toBe(second.ciphertext);
 });
 
-it('recognizes the shape of a Gemini key', () => {
-  expect(looksLikeGeminiKey(` ${KEY} `)).toBe(true);
-  expect(looksLikeGeminiKey('my password')).toBe(false);
+it('accepts any key-shaped value and explains common copy mistakes', () => {
+  expect(geminiKeyProblem(` ${KEY} `)).toBeNull();
+  expect(geminiKeyProblem('AQ.Ab8RN6Example-newer.key_format123456')).toBeNull();
+  expect(geminiKeyProblem('gen-lang-client-0873496628')).toMatch(/Project ID/);
+  expect(geminiKeyProblem('...-lpw')).toMatch(/end of the key/);
+  expect(geminiKeyProblem('my api key here please')).toMatch(/spaces/);
 });

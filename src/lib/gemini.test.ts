@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { askGemini, geminiBody, GeminiError, googleAiModeUrl } from './gemini';
+import { askGemini, geminiBody, GeminiError, googleAiModeUrl, verifyGeminiKey } from './gemini';
 
 const reply = (status: number, body: object) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
 const answer = { candidates: [{ content: { parts: [{ text: 'A **heat pump**.' }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/a', title: 'Example' } }, { web: { uri: 'https://example.com/a', title: 'Dup' } }, { web: { uri: 'javascript:alert(1)', title: 'Bad' } }] } }] };
@@ -32,4 +32,10 @@ it('explains a rejected key and an exhausted allowance', async () => {
 
 it('builds a Google AI Mode link for the free fallback', () => {
   expect(googleAiModeUrl('what is R32?')).toBe('https://www.google.com/search?udm=50&q=what%20is%20R32%3F');
+});
+
+it('checks a key with Google before it is saved', async () => {
+  await expect(verifyGeminiKey('KEY', vi.fn(() => reply(200, { models: [] })) as unknown as typeof fetch)).resolves.toBe('ok');
+  await expect(verifyGeminiKey('KEY', vi.fn(() => reply(400, { error: { message: 'API key not valid.' } })) as unknown as typeof fetch)).rejects.toMatchObject({ kind: 'key' });
+  await expect(verifyGeminiKey('KEY', vi.fn(() => Promise.reject(new TypeError('offline'))) as unknown as typeof fetch)).resolves.toBe('offline');
 });

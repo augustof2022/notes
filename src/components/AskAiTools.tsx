@@ -6,8 +6,8 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucide-react';
 import { Modal } from './Modal';
-import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, looksLikeGeminiKey, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
-import { askGemini, GEMINI_MODEL, GeminiError, googleAiModeUrl, type AskRequest } from '../lib/gemini';
+import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
+import { askGemini, GEMINI_MODEL, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
 import { answerMarkdown, askSelection } from '../lib/ask-ai-scene';
 import { jotPlacement } from '../lib/jot-layout';
 import { applyRichText } from '../lib/rich-text-scene';
@@ -121,7 +121,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     {dialog && createPortal(<AskAiDialog dialog={dialog} sealed={sealed} signedIn={signedIn} pending={pending.current}
       onClose={() => setDialog(null)} onGoogle={askGoogle} onMode={mode => setDialog({ mode })}
       onAsk={question => { const next = selectionRequest(question); if (next.request.question.trim()) void proceed(next); }}
-      onSetup={async (key, passphrase, remember) => { const { sealed: value, lock } = await sealAiKey(key, passphrase); await saveSealedAiKey(client!, value); await keyReady(key.trim(), lock, value, remember); }}
+      onSetup={async (key, passphrase, remember) => { if (await verifyGeminiKey(key) === 'offline') onMessage('Could not reach Google to check the key; saved it anyway.'); const { sealed: value, lock } = await sealAiKey(key, passphrase); await saveSealedAiKey(client!, value); await keyReady(key.trim(), lock, value, remember); }}
       onUnlock={async (passphrase, remember) => { const value = sealed || await currentSealed(); if (!value) { setDialog({ mode: 'setup' }); return; } const { apiKey: key, lock } = await unlockAiKey(value, passphrase); await keyReady(key, lock, value, remember); }}
       onForget={async () => { apiKey.current = null; await forgetAiKeyLock(owner); setDialog(null); onMessage('Ask AI is locked on this device. Your encrypted key stays in your account.'); }}
       onRemove={async () => { apiKey.current = null; await forgetAiKeyLock(owner); await deleteSealedAiKey(client!, owner); setSealed(null); setDialog(null); onMessage('Your Gemini key was removed from your account.'); }} />, document.body)}
@@ -176,23 +176,23 @@ function AskAiDialog({ dialog, sealed, signedIn, pending, onClose, onGoogle, onM
       <button type="button" className="primary-button" onClick={onClose}>Done</button>
     </div>
   </Modal>;
-  const mismatch = !!confirm && confirm !== passphrase, keyValid = looksLikeGeminiKey(key);
+  const mismatch = !!confirm && confirm !== passphrase, keyProblem = geminiKeyProblem(key), keyValid = !!key.trim() && !keyProblem;
   return <Modal title="Set up Ask AI" onClose={onClose}>
     <form onSubmit={event => { event.preventDefault(); if (keyValid && passphrase.length >= 8 && !mismatch) void act(() => onSetup(key, passphrase, remember)); }}>
       <ol className="ask-ai-steps">
         <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio → API keys</a> and sign in with your Google account.</li>
-        <li>Choose <strong>Create API key</strong> and copy it. The free tier needs no card.</li>
+        <li>Choose <strong>Create API key</strong>, then copy it with the copy button on the key card (not the Project ID). The free tier needs no card; skip any billing setup, because a project with billing (shown as Tier 1) is charged per question.</li>
         <li>Paste it below and choose a passphrase. You will need the passphrase once on each device.</li>
       </ol>
       <label>Gemini API key<input type="password" autoComplete="off" spellCheck={false} value={key} placeholder="Paste your key" onChange={event => setKey(event.target.value)} /></label>
-      {key && !keyValid && <p className="form-error">That does not look like a Gemini API key. Copy the whole key from AI Studio.</p>}
+      {keyProblem && <p className="form-error">{keyProblem}</p>}
       <label>Passphrase (at least 8 characters)<input type="password" autoComplete="new-password" value={passphrase} onChange={event => setPassphrase(event.target.value)} /></label>
       <label>Repeat passphrase<input type="password" autoComplete="new-password" value={confirm} onChange={event => setConfirm(event.target.value)} /></label>
       {mismatch && <p className="form-error">The passphrases do not match.</p>}
       {rememberBox}
       <p className="small-note">Your key is encrypted on this device before it is saved; nobody, including the app owner, can read it without your passphrase. There is no passphrase recovery: if you forget it, just save a new key.</p>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="dialog-actions">{google}<button type="submit" className="primary-button" disabled={busy || !keyValid || passphrase.length < 8 || confirm !== passphrase}>{busy ? 'Encrypting…' : pending?.request.question.trim() ? 'Save and ask' : 'Save key'}</button></div>
+      <div className="dialog-actions">{google}<button type="submit" className="primary-button" disabled={busy || !keyValid || passphrase.length < 8 || confirm !== passphrase}>{busy ? 'Checking key…' : pending?.request.question.trim() ? 'Save and ask' : 'Save key'}</button></div>
     </form>
   </Modal>;
 }

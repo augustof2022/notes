@@ -38,7 +38,16 @@ export async function unlockAiKey(sealed: SealedAiKey, passphrase: string) {
   return { apiKey: await openAiKey(sealed, lock), lock };
 }
 
-export const looksLikeGeminiKey = (value: string) => /^[A-Za-z0-9_-]{30,80}$/.test(value.trim());
+/** A friendly reason a pasted value cannot be an API key, or null when it might be one. */
+export function geminiKeyProblem(value: string): string | null {
+  const text = value.trim();
+  if (!text) return null;
+  if (/^gen-lang-client-\d+$/i.test(text) || /^projects\//.test(text)) return 'That is the Project ID, not the key. In AI Studio, use the copy button on the key card (the first icon), not the Project ID line.';
+  if (/^\.\.\./.test(text) || text.length < 20) return 'That looks like only the end of the key. Use the copy button on the key card to copy the whole key.';
+  if (/\s/.test(text)) return 'The key cannot contain spaces. Copy just the key itself.';
+  if (!/^[A-Za-z0-9._~+/=-]{20,200}$/.test(text)) return 'That does not look like an API key. Use the copy button on the key card in AI Studio.';
+  return null;
+}
 
 // --- Account storage (ciphertext only) -------------------------------------
 
