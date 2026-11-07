@@ -15,6 +15,7 @@ import { restoreSnapping, snapMode, snapState, type SnapMode } from '../lib/snap
 import { DiagramTools } from './DiagramTools';
 import { LockedObjectsControl } from './LockedObjectsControl';
 import { LayersSidebar } from './LayersSidebar';
+import { MoveHandle } from './MoveHandle';
 import { ObjectColors } from './ObjectColors';
 import { StampTools } from './StampTools';
 import { WritingTools, type WritingHandle } from './WritingTools';
@@ -24,6 +25,7 @@ import { clipboardRichDoc, richDocText } from '../lib/rich-text';
 import { BoardChrome, type BoardChromeHandle } from './BoardChrome';
 import { repairDiagramElements } from '../lib/diagram-scene';
 import { installLockedPan } from '../lib/locked-pan';
+import { installTouchGestureGuard } from '../lib/touch-gesture-guard';
 import { db } from '../lib/db';
 import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
@@ -75,6 +77,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   useEffect(() => {
     if (canvasRoot && api) return installLockedPan(canvasRoot, api, () => !!viewLock.current);
   }, [canvasRoot, api]);
+  useEffect(() => { if (canvasRoot && api) return installTouchGestureGuard(canvasRoot, api); }, [canvasRoot, api]);
   const latest = useRef({ settings, onSaved, onMessage }); latest.current = { settings, onSaved, onMessage };
   const reloadImages = useBoardImages(api, ready, board.key, board.scope, client, onImageState);
   // Open text and cached images immediately; remote files arrive progressively.
@@ -312,6 +315,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <DiagramTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <LockedObjectsControl api={api} root={canvasRoot} />}
     {api && ready && <LayersSidebar api={api} root={canvasRoot} scope={board.key} onMessage={onMessage} />}
+    {api && ready && <MoveHandle api={api} root={canvasRoot} />}
     {api && ready && <ObjectColors api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools ref={writing} api={api} root={canvasRoot} onMessage={onMessage} />}

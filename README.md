@@ -2,7 +2,7 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.14.1**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.15.0**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
@@ -18,6 +18,8 @@ Current release: **v0.14.1**. The app shows the installed version; About → Ver
 - Partial erasing with an adjustable circular tip now works on handwriting, shapes, images, text, icon stamps, and connections. Choose **Partial eraser** or **Object eraser** in **Writing tool settings** under Board actions; press **E** to reuse your saved mode. Partial erasing removes real pixels with transparency and protects locked objects. Shapes, text, connections, and filled drawings become movable, resizable image cutouts after you lift the eraser; Undo restores the original editable objects. Plain pen strokes remain vector ink. Live web embeds and structural frames are not pixel-erased.
 - The object palette keeps its preset colors and adds a **…** button beside **Stroke** and **Background**. Each opens a compact inline custom picker, hex entry, and **No stroke** or **No background** without a separate dialog or toolbar button. Apply colors to selected unlocked objects or set defaults for the next object. Diagram Colors & lines also offers 36 presets and these custom controls. Turning off a shape border preserves its label.
 - Draw and hold: pause about650 ms before lifting the pen to preview a clean line, circle/ellipse, square/rectangle, or triangle, then lift to apply. Immediate release preserves ink; uncertain scribbles remain ink. Toggle this in Writing tool settings. Undo restores the original stroke.
+- Touch editing: a pinch whose first finger lands on a selection or its resize handles no longer moves or scales that selection; the accidental change is undone and the selection released so the gesture only pans and zooms. On touch screens, a round **move** button below a selection drags it without resizing, including small labels covered by their resize handles.
+- Typed text wraps at the width you edited it at and its box shrinks to the longest line. Corner-resizing scales the text and its wrap width; dragging a side handle sets a fixed width. Text inside shapes and on connections keeps its container's layout.
 - Paste screenshots directly with Ctrl+V, or drag an image onto the canvas.
 - Nested folders with rename, move, drag into another folder, and recoverable Trash. Library sections have separate New folder and New board actions. Folders and boards sort independently by name (A–Z/Z–A), creation date, or last modification (newest/oldest); choices are remembered on the device and also order the sidebar.
 - Folder-scoped search across board names, typed notes, recognized English image text, and reviewed handwriting text. Results jump to the matching element when the view is unlocked.

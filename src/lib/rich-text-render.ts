@@ -43,16 +43,21 @@ function fingerprint(value: string) {
 }
 
 /** Measure the same HTML/CSS as the editor, then emit portable SVG text, never foreignObject. */
-export function renderRichText(doc: RichDoc, options: { width: number; fontSize: number; color: string; textAlign: string }): RichTextRender {
-  const width = Math.max(24, Math.min(2400, options.width));
-  const key = JSON.stringify([doc, width, options.fontSize, options.color, options.textAlign]);
+export function renderRichText(doc: RichDoc, options: { width: number; fontSize: number; color: string; textAlign: string; fit?: boolean }): RichTextRender {
+  const wrap = Math.max(24, Math.min(2400, options.width));
+  let width = wrap;
+  const key = JSON.stringify([doc, wrap, options.fontSize, options.color, options.textAlign, !!options.fit]);
   const previous = cache.get(key); if (previous) return previous;
   const host = richNode(cleanRichDoc(doc)) as HTMLElement;
   host.className = 'note-rich-content note-rich-measure';
-  Object.assign(host.style, { position: 'fixed', left: '-100000px', top: '0', width: `${width}px`, fontSize: `${options.fontSize}px`, color: safeTextColor(options.color) || '#1b1b1f', textAlign: options.textAlign, pointerEvents: 'none', visibility: 'hidden' });
+  // Fitted text keeps the same line breaks as at its wrap width; its box
+  // then shrinks to the content instead of keeping empty space beside it.
+  Object.assign(host.style, { position: 'fixed', left: '-100000px', top: '0', width: options.fit ? 'fit-content' : `${wrap}px`, maxWidth: `${wrap}px`, fontSize: `${options.fontSize}px`, color: safeTextColor(options.color) || '#1b1b1f', textAlign: options.textAlign, pointerEvents: 'none', visibility: 'hidden' });
   host.setAttribute('aria-hidden', 'true'); document.body.append(host);
   try {
-    const origin = host.getBoundingClientRect(), height = Math.max(options.fontSize * 1.35, Math.ceil(origin.height));
+    const origin = host.getBoundingClientRect();
+    if (options.fit) width = Math.min(wrap, Math.max(Math.ceil(options.fontSize), Math.ceil(origin.width)));
+    const height = Math.max(options.fontSize * 1.35, Math.ceil(origin.height));
     const background: string[] = [], foreground: string[] = [];
     const rect = (box: DOMRect, attributes: string) => `<rect x="${n(box.x - origin.x)}" y="${n(box.y - origin.y)}" width="${n(box.width)}" height="${n(box.height)}" ${attributes}/>`;
     for (const element of host.querySelectorAll<HTMLElement>('pre, blockquote, td, th, hr, code')) {

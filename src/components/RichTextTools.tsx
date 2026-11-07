@@ -64,7 +64,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     const doc = data?.doc || plainRichDoc(base.originalText);
     const deleted = api.getSceneElementsIncludingDeleted().find(element => element.id === base.id)?.isDeleted;
     const state = api.getAppState(), zoom = state.zoom.value;
-    let width = Math.min(2400, base.containerId ? richTextWidth(base, api.getSceneElements()) : data || !base.autoResize ? Math.max(48, base.width) : Math.max(320, base.width));
+    let width = Math.min(2400, base.containerId ? richTextWidth(base, api.getSceneElements()) : data?.fit ? Math.max(48, data.fit.wrap) : data || !base.autoResize ? Math.max(48, base.width) : Math.max(320, base.width));
     const originX = container && ['rectangle', 'ellipse', 'diamond'].includes(container.type) ? container.x + (container.width - width) / 2 : base.x;
     const left = (originX + state.scrollX) * zoom;
     if (!base.containerId) width = Math.max(48, Math.min(width, (state.width - 16) / zoom, !data && base.autoResize ? (state.width - left - 16) / zoom : Infinity));
@@ -84,7 +84,8 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     const text = structuredClone(existing?.type === 'text' ? existing : active.base);
     if (index < 0) elements.push(text); else elements[index] = text;
     mutateElement(text, { width: active.width }, false);
-    applyRichText(text, active.doc, active.color, true);
+    // Standalone text wraps at the editing width, then its box hugs the text.
+    applyRichText(text, active.doc, active.color, true, text.containerId ? undefined : { wrap: active.width, width: active.width, fontSize: text.fontSize });
     if (!readRichText(text)) {
       const [measured] = convertToExcalidrawElements([{ type: 'text', text: richDocText(active.doc), x: text.x, y: text.y,
         fontSize: text.fontSize, fontFamily: text.fontFamily, textAlign: text.textAlign, verticalAlign: text.verticalAlign,

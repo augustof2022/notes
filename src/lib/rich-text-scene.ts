@@ -1,7 +1,7 @@
 import { convertToExcalidrawElements, mutateElement } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement, ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types';
 import type { BinaryFileData } from '@excalidraw/excalidraw/types';
-import { hasRichFormatting, readRichText, richDocText, safeTextColor, type RichDoc } from './rich-text';
+import { hasRichFormatting, readRichText, richDocText, safeTextColor, type RichDoc, type RichTextFit } from './rich-text';
 import { renderRichText } from './rich-text-render';
 
 export const richRenderId = (id: string) => `note-rich-${id}`;
@@ -19,13 +19,31 @@ export function richTextWidth(text: ExcalidrawTextElement, elements: readonly Ex
     const factor = container.type === 'ellipse' ? Math.SQRT1_2 : container.type === 'diamond' ? 0.5 : 1;
     return Math.max(24, container.width * factor - 10);
   }
-  return text.width > 24 ? text.width : 360;
+  const fit = readRichText(text)?.fit;
+  if (fit) return fit.wrap;
+  // Small labels can legitimately be narrower than 24px; only a missing or
+  // collapsed width falls back to the default wrapping width.
+  return text.width >= Math.min(24, text.fontSize) ? text.width : 360;
+}
+
+/**
+ * Keep a fitted text's wrap width in step with native edits: corner scaling
+ * changes its font size proportionally, while a side handle that changes only
+ * the width turns it into an ordinary fixed-width text box.
+ */
+export function syncRichTextFit(text: Pick<ExcalidrawTextElement, 'width' | 'fontSize' | 'containerId'>, fit: RichTextFit | undefined): RichTextFit | undefined {
+  if (!fit || text.containerId) return undefined;
+  if (Math.abs(text.fontSize - fit.fontSize) > 0.001) {
+    const scale = text.fontSize / fit.fontSize;
+    return { wrap: Math.max(24, fit.wrap * scale), width: text.width, fontSize: text.fontSize };
+  }
+  return Math.abs(text.width - fit.width) > 0.5 ? undefined : fit;
 }
 
 /** Text remains searchable and bound to its shape; a derived SVG supplies mixed styles. */
-export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: string, keepDocument = false) {
+export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: string, keepDocument = false, fit?: RichTextFit) {
   const plain = richDocText(doc), rich = hasRichFormatting(doc) || (keepDocument && !!plain.trim()), customData = { ...text.customData };
-  if (rich) customData.noteRichText = { version: 1, doc, color: safeTextColor(color) || '#1b1b1f' };
+  if (rich) customData.noteRichText = { version: 1, doc, color: safeTextColor(color) || '#1b1b1f', ...(fit && !text.containerId ? { fit } : {}) };
   else delete customData.noteRichText;
   mutateElement(text, { originalText: plain, text: plain, customData, isDeleted: !plain.trim() && !rich, strokeColor: rich ? 'transparent' : color, autoResize: !rich && !text.containerId }, false);
 }
@@ -47,7 +65,17 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[], edit
     }
     const container = byId.get(source.containerId || '');
     if (container?.isDeleted) { update(source, { isDeleted: true }); continue; }
-    const render = renderRichText(data.doc, { width: richTextWidth(source, elements), fontSize: source.fontSize, color: data.color, textAlign: source.textAlign });
+    const fit = syncRichTextFit(source, data.fit);
+    const wrap = fit ? fit.wrap : source.containerId || !data.fit ? richTextWidth(source, elements) : source.width;
+    const render = renderRichText(data.doc, { width: wrap, fontSize: source.fontSize, color: data.color, textAlign: source.textAlign, fit: !!fit });
+    if (fit || data.fit) {
+      const nextFit = fit ? { wrap: fit.wrap, width: render.width, fontSize: source.fontSize } : undefined;
+      if (JSON.stringify(nextFit) !== JSON.stringify(data.fit)) {
+        const noteRichText: Record<string, unknown> = { ...source.customData?.noteRichText };
+        if (nextFit) noteRichText.fit = nextFit; else delete noteRichText.fit;
+        update(source, { customData: { ...source.customData, noteRichText } });
+      }
+    }
     let x = source.x, y = source.y;
     if (container?.type === 'arrow') y += (source.height - render.height) / 2;
     if (container && ['rectangle', 'ellipse', 'diamond'].includes(container.type)) {

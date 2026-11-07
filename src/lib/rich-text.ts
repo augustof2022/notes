@@ -8,7 +8,13 @@ import TaskItem from '@tiptap/extension-task-item';
 import { Markdown, MarkdownManager } from '@tiptap/markdown';
 
 export type RichDoc = JSONContent;
-export interface RichTextData { version: 1; doc: RichDoc; color: string }
+/** Standalone text wraps at `wrap` and its box hugs the widest line (`width`, measured at `fontSize`). */
+export interface RichTextFit { wrap: number; width: number; fontSize: number }
+export interface RichTextData { version: 1; doc: RichDoc; color: string; fit?: RichTextFit }
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+export function readRichTextFit(value: any): RichTextFit | undefined {
+  return value && finite(value.wrap) && finite(value.width) && finite(value.fontSize) ? { wrap: value.wrap, width: value.width, fontSize: value.fontSize } : undefined;
+}
 export const RICH_FILE_PREFIX = 'note-rich-text-';
 export const isRichTextFile = (id: string) => id.startsWith(RICH_FILE_PREFIX);
 export const RICH_FONTS = ['Arial', 'Georgia', 'monospace'] as const;
@@ -95,7 +101,9 @@ export function richDocText(doc: RichDoc): string {
 }
 export function readRichText(element: { customData?: Record<string, any> | null }): RichTextData | null {
   const data = element.customData?.noteRichText;
-  return data?.version === 1 && data.doc?.type === 'doc' ? { version: 1, doc: cleanRichDoc(data.doc), color: safeTextColor(data.color) || '#1b1b1f' } : null;
+  if (data?.version !== 1 || data.doc?.type !== 'doc') return null;
+  const fit = readRichTextFit(data.fit);
+  return { version: 1, doc: cleanRichDoc(data.doc), color: safeTextColor(data.color) || '#1b1b1f', ...(fit ? { fit } : {}) };
 }
 export function richTextColor(element: { strokeColor: string; customData?: Record<string, any> | null }) { return readRichText(element)?.color || element.strokeColor; }
 
