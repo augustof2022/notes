@@ -27,7 +27,9 @@ export function MoveHandle({ api, root }: { api: ExcalidrawImperativeAPI; root: 
   function bounds(): SceneBounds | null {
     const state = api.getAppState();
     if (state.activeTool.type !== 'selection' || state.editingTextElement || state.viewModeEnabled || state.newElement || state.openDialog || state.editingLinearElement) return null;
-    const selected = api.getSceneElements().filter(element => state.selectedElementIds[element.id]);
+    const ids = Object.keys(state.selectedElementIds);
+    if (!ids.length) return null; // Nothing selected: skip scanning a large board on every frame.
+    const wanted = new Set(ids), selected = api.getSceneElements().filter(element => wanted.has(element.id));
     if (!selected.length || selected.every(element => element.locked)) return null;
     return getCommonBounds(selected);
   }

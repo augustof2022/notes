@@ -3,6 +3,7 @@ import { liveQuery } from 'dexie';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { db } from '../lib/db';
+import { contentFingerprint } from '../lib/canvas-signature';
 import { recordKey } from '../types';
 import { boardImageIds, loadBoardImages, type BoardImageState } from '../lib/board-images';
 
@@ -13,7 +14,13 @@ export function useBoardImages(api: ExcalidrawImperativeAPI | null, ready: boole
   const reload = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     if (!api || !ready) return;
-    const update = () => setIdsKey(previous => { const next = JSON.stringify(boardImageIds(api.getSceneElements())); return previous === next ? previous : next; });
+    let content = '';
+    const update = () => {
+      const elements = api.getSceneElements(), next = contentFingerprint(elements);
+      if (next === content) return; // Pan and zoom never add or remove images.
+      content = next;
+      setIdsKey(previous => { const ids = JSON.stringify(boardImageIds(elements)); return previous === ids ? previous : ids; });
+    };
     update(); return api.onChange(update);
   }, [api, ready]);
   useEffect(() => {

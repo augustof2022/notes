@@ -11,6 +11,7 @@ import { diagramShortcutNode, diagramShortcutRelation } from '../lib/diagram-sho
 import { installConnectionBendEditing } from '../lib/connection-bend-editing';
 import { richTextColor } from '../lib/rich-text';
 import { DiagramPanel, type ConnectionSettings, type DiagramStyle } from './DiagramPanel';
+import { contentFingerprint } from '../lib/canvas-signature';
 import './diagram.css';
 
 function selectedDiagram(elements: readonly ExcalidrawElement[], state: AppState) {
@@ -109,7 +110,11 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     return () => { observer.disconnect(); slot?.remove(); };
   }, [root]);
   useEffect(() => api.onChange((elements, state) => {
-    const key = `${Object.keys(state.selectedElementIds).join(',')}:${elements.map(element => `${element.id}:${element.version}`).join('|')}:${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.width}:${state.height}:${state.editingTextElement?.id || ''}:${state.cursorButton}:${state.openMenu || ''}`;
+    // The view only matters for actions floating beside a selection; without
+    // one, panning and zooming a large board must not re-render diagram tools.
+    const selection = Object.keys(state.selectedElementIds).join(',');
+    const view = selection || live.current.sourceId || live.current.placing ? `${state.scrollX}:${state.scrollY}:${state.zoom.value}` : '';
+    const key = `${selection}:${contentFingerprint(elements)}:${view}:${state.width}:${state.height}:${state.editingTextElement?.id || ''}:${state.cursorButton}:${state.openMenu || ''}`;
     setSnapshot(previous => previous.key === key ? previous : { elements, state, key });
   }), [api]);
   useEffect(() => {

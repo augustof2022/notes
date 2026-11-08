@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Group, Layers, LocateFixed, LockKeyhole, Min
 import { boardObjects, chosenObjects, lockTargets, objectSelection, readLayerPreferences, saveLayerPreferences, selectedObjectKeys, toggleObjectKey, type BoardObject, type LayerPreferences } from '../lib/board-objects';
 import { setObjectsLocked } from '../lib/object-lock-scene';
 import { LayerPreview } from './LayerPreview';
+import { contentFingerprint } from '../lib/canvas-signature';
 import './layers.css';
 
 export function LayersSidebar({ api, root, scope, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null; scope: string; onMessage: (message: string) => void }) {
@@ -25,13 +26,17 @@ export function LayersSidebar({ api, root, scope, onMessage }: { api: Excalidraw
   function hide() { update({ open: false }); requestAnimationFrame(() => host?.querySelector<HTMLButtonElement>('.layers-toggle')?.focus()); }
   useEffect(() => {
     if (!preferences.open) { resizeCleanup.current?.(); return; }
-    let frame = 0;
+    let frame = 0, lastContent = '';
     const refresh = () => {
       frame = 0;
       const state = api.getAppState();
       if (state.cursorButton === 'down') return; // Do not export previews during a pen/drag gesture.
-      const elements = api.getSceneElements(), objects = boardObjects(elements);
+      const elements = api.getSceneElements();
       const signature = JSON.stringify([state.selectedElementIds, state.selectedGroupIds]);
+      const content = `${contentFingerprint(elements)}|${signature}|${Object.keys(api.getFiles()).length}`;
+      if (content === lastContent) return; // Pan and zoom change neither the layers nor the selection.
+      lastContent = content;
+      const objects = boardObjects(elements);
       if (signature !== lastSelection.current) {
         lastSelection.current = signature;
         const keys = selectedObjectKeys(objects, state.selectedElementIds, state.selectedGroupIds);

@@ -31,7 +31,7 @@ import { blobToDataURL, localSceneFiles, storeSceneFiles } from '../lib/assets';
 import { queueOcr } from '../lib/ocr';
 import { useBoardImages } from './useBoardImages';
 import { boardImageIds, type BoardImageState } from '../lib/board-images';
-import { sceneSignature } from '../lib/canvas-signature';
+import { contentFingerprint, elementsSignature, sceneSignature } from '../lib/canvas-signature';
 import { boardContentChanged, canvasSaveAnchor, reconcileCanvasSave } from '../lib/sync-merge';
 
 export interface CanvasHandle {
@@ -74,6 +74,10 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const pending = useRef<{ elements: readonly ExcalidrawElement[]; state: Board['appState']; files: BinaryFiles } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saving = useRef(Promise.resolve());
+  // Pan and zoom fire onChange for every frame without changing any element.
+  // Remember the last content so those frames skip repairs and deep copies.
+  const lastSelection = useRef<AppState['selectedElementIds'] | null>(null);
+  const lastContent = useRef<{ key: string; signature: string; stored: readonly ExcalidrawElement[] | null } | null>(null);
   const savesInFlight = useRef(0);
   const booted = useRef(false);
   useEffect(() => {
@@ -131,51 +135,69 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     const selectedPen = elements.find(x => x.type === 'freedraw' && !x.isDeleted && state.selectedElementIds[x.id]);
     setShowPenWidth(state.activeTool.type === 'freedraw' || !!selectedPen);
     setWidthValue(selectedPen?.strokeWidth || state.currentItemStrokeWidth);
-    const originals = new Map<ExcalidrawElement, ExcalidrawElement>();
-    const repairElement: typeof mutateElement = (element, updates, informMutation, options) => {
-      if (!originals.has(element)) originals.set(element, { ...element });
-      return mutateElement(element, updates, informMutation, options);
-    };
-    let repaired = repairDiagramElements(elements, state, repairElement);
-    const rich = repairRichTextElements(elements, state.editingTextElement?.id, repairElement);
-    elements = rich.elements;
-    repaired ||= rich.changed;
-    for (const element of elements) {
-      const updates = constantInkUpdates(element);
-      if (updates) { repairElement(element, updates, false); repaired = true; }
+    // Everything the repairs read: element content plus the few editing states
+    // they depend on. Pan and zoom change none of these.
+    const contentKey = `${contentFingerprint(elements)}|${state.editingTextElement?.id || ''}|${state.editingLinearElement?.elementId || ''}|${state.selectedLinearElement?.elementId || ''}|${state.newElement?.id || ''}|${state.openDialog?.name || ''}|${state.activeTool.type}:${state.activeTool.customType || ''}:${state.activeTool.locked}`;
+    const viewOnly = booted.current && lastContent.current?.key === contentKey && lastSelection.current === state.selectedElementIds;
+    let repaired = false, correction: ReturnType<typeof viewLockCorrection> = null;
+    if (viewOnly) {
+      correction = viewLockCorrection(state, viewLock.current);
+      if (api && correction) { correcting.current = true; try { api.updateScene({ appState: { zoom: correction.zoom }, captureUpdate: CaptureUpdateAction.NEVER }); } finally { correcting.current = false; } }
+    } else {
+      const originals = new Map<ExcalidrawElement, ExcalidrawElement>();
+      const repairElement: typeof mutateElement = (element, updates, informMutation, options) => {
+        if (!originals.has(element)) originals.set(element, { ...element });
+        return mutateElement(element, updates, informMutation, options);
+      };
+      repaired = repairDiagramElements(elements, state, repairElement);
+      const rich = repairRichTextElements(elements, state.editingTextElement?.id, repairElement);
+      elements = rich.elements;
+      repaired ||= rich.changed;
+      for (const element of elements) {
+        const updates = constantInkUpdates(element);
+        if (updates) { repairElement(element, updates, false); repaired = true; }
+      }
+      // Keep the native pen's live object until drawing finishes. Other repairs
+      // use replacements to preserve a single Undo step for the user's action.
+      elements = repairedSceneElements(elements, originals, state.newElement);
+      correction = viewLockCorrection(state, viewLock.current);
+      const tool = stickyTextTool(state.activeTool, previousTool.current);
+      const selectedElementIds = { ...state.selectedElementIds };
+      const byId = new Map(elements.map(element => [element.id, element]));
+      // Include derived text in the native selection export, while ordinary
+      // selection continues to target the editable text or its diagram shape.
+      for (const element of elements) if (element.customData?.noteRichTextRender) {
+        const source = byId.get(element.customData.noteRichTextRender.ownerId);
+        const include = state.openDialog?.name === 'imageExport' && source && (selectedElementIds[source.id] || (source.type === 'text' && source.containerId && selectedElementIds[source.containerId]) || (source.frameId && selectedElementIds[source.frameId]));
+        if (include && !element.isDeleted) selectedElementIds[element.id] = true; else delete selectedElementIds[element.id];
+      }
+      const selectionChanged = JSON.stringify(selectedElementIds) !== JSON.stringify(state.selectedElementIds);
+      previousTool.current = state.activeTool.type;
+      correcting.current = true;
+      try {
+        const missing = api && rich.files.filter(file => !api.getFiles()[file.id]);
+        if (api && (repaired || correction || selectionChanged)) api.updateScene({ elements, appState: { zoom: correction?.zoom || state.zoom, selectedElementIds }, captureUpdate: CaptureUpdateAction.NEVER });
+        if (api && missing?.length) api.addFiles(missing);
+        if (api && tool) api.setActiveTool(tool);
+      } finally { correcting.current = false; }
+      // The repairs above may have replaced elements; key the result they produced.
+      const settledKey = repaired ? `${contentFingerprint(elements)}${contentKey.slice(contentKey.indexOf('|'))}` : contentKey;
+      if (lastContent.current?.key !== settledKey) lastContent.current = { key: settledKey, signature: elementsSignature(elements), stored: null };
+      lastSelection.current = api?.getAppState().selectedElementIds || state.selectedElementIds;
+      setEmpty(!elements.some(x => !x.isDeleted) && !state.editingTextElement);
     }
-    // Keep the native pen's live object until drawing finishes. Other repairs
-    // use replacements to preserve a single Undo step for the user's action.
-    elements = repairedSceneElements(elements, originals, state.newElement);
-    const correction = viewLockCorrection(state, viewLock.current);
-    const tool = stickyTextTool(state.activeTool, previousTool.current);
-    const selectedElementIds = { ...state.selectedElementIds };
-    const byId = new Map(elements.map(element => [element.id, element]));
-    // Include derived text in the native selection export, while ordinary
-    // selection continues to target the editable text or its diagram shape.
-    for (const element of elements) if (element.customData?.noteRichTextRender) {
-      const source = byId.get(element.customData.noteRichTextRender.ownerId);
-      const include = state.openDialog?.name === 'imageExport' && source && (selectedElementIds[source.id] || (source.type === 'text' && source.containerId && selectedElementIds[source.containerId]) || (source.frameId && selectedElementIds[source.frameId]));
-      if (include && !element.isDeleted) selectedElementIds[element.id] = true; else delete selectedElementIds[element.id];
-    }
-    const selectionChanged = JSON.stringify(selectedElementIds) !== JSON.stringify(state.selectedElementIds);
-    previousTool.current = state.activeTool.type;
-    correcting.current = true;
-    try {
-      const missing = api && rich.files.filter(file => !api.getFiles()[file.id]);
-      if (api && (repaired || correction || selectionChanged)) api.updateScene({ elements, appState: { zoom: correction?.zoom || state.zoom, selectedElementIds }, captureUpdate: CaptureUpdateAction.NEVER });
-      if (api && missing?.length) api.addFiles(missing);
-      if (api && tool) api.setActiveTool(tool);
-    } finally { correcting.current = false; }
-    const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean);
-    setEmpty(!elements.some(x => !x.isDeleted) && !state.editingTextElement);
+    const content = lastContent.current!;
+    const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean, content.signature);
     if (!booted.current) { booted.current = true; setReady(true); if (!repaired) { lastSignature.current = signature; return; } }
     if (lastSignature.current === signature) return;
     lastSignature.current = signature;
     // Copy now: canvas file maps and app state can mutate during a delayed save.
-    pending.current = { elements: structuredClone(richTextForStorage(elements)), state: structuredClone(clean), files: { ...files } };
+    // A pan or zoom only moves the view, so reuse the copy of unchanged elements.
+    content.stored ||= structuredClone(richTextForStorage(elements));
+    pending.current = { elements: content.stored, state: structuredClone(clean), files: { ...files } };
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { void flush(false).catch(() => {}); }, 300);
+    // Content edits save quickly; a moving view settles first.
+    timer.current = setTimeout(() => { void flush(false).catch(() => {}); }, viewOnly ? 1200 : 300);
   }
   function jumpTo(elementId: string) {
     if (!api) return;

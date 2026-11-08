@@ -114,7 +114,7 @@ export function renderRichText(doc: RichDoc, options: { width: number; fontSize:
     for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
     const file = { id: `${RICH_FILE_PREFIX}${fingerprint(svg)}`, dataURL: `data:image/svg+xml;base64,${btoa(binary)}`, mimeType: 'image/svg+xml', created: 0 } as BinaryFileData;
     const rendered = { width, height, file };
-    cache.set(key, rendered); if (cache.size > 100) cache.delete(cache.keys().next().value!);
+    cache.set(key, rendered); if (cache.size > 4000) cache.delete(cache.keys().next().value!);
     return rendered;
   } finally { host.remove(); }
 }

@@ -13,8 +13,9 @@ export function selectedText(elements: readonly ExcalidrawElement[], selected: R
   return elements.some(element => element.id === text.containerId && element.locked) ? null : text;
 }
 
-export function richTextWidth(text: ExcalidrawTextElement, elements: readonly ExcalidrawElement[]) {
-  const container = elements.find(element => element.id === text.containerId && !element.isDeleted);
+export function richTextWidth(text: ExcalidrawTextElement, elements: readonly ExcalidrawElement[] | ReadonlyMap<string, ExcalidrawElement>) {
+  const found = !text.containerId ? undefined : 'get' in elements ? elements.get(text.containerId) : elements.find(element => element.id === text.containerId);
+  const container = found && !found.isDeleted ? found : undefined;
   if (container && ['rectangle', 'ellipse', 'diamond'].includes(container.type)) {
     const factor = container.type === 'ellipse' ? Math.SQRT1_2 : container.type === 'diamond' ? 0.5 : 1;
     return Math.max(24, container.width * factor - 10);
@@ -66,7 +67,7 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[], edit
     const container = byId.get(source.containerId || '');
     if (container?.isDeleted) { update(source, { isDeleted: true }); continue; }
     const fit = syncRichTextFit(source, data.fit);
-    const wrap = fit ? fit.wrap : source.containerId || !data.fit ? richTextWidth(source, elements) : source.width;
+    const wrap = fit ? fit.wrap : source.containerId || !data.fit ? richTextWidth(source, byId) : source.width;
     const render = renderRichText(data.doc, { width: wrap, fontSize: source.fontSize, color: data.color, textAlign: source.textAlign, fit: !!fit });
     if (fit || data.fit) {
       const nextFit = fit ? { wrap: fit.wrap, width: render.width, fontSize: source.fontSize } : undefined;

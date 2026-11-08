@@ -33,6 +33,7 @@ export const RichTextTools = forwardRef<RichTextHandle, { api: ExcalidrawImperat
     return () => root.removeAttribute('data-inline-editing');
   }, [root, !!session]);
   useEffect(() => api.onChange((_elements, state) => {
+    if (!current.current) return; // Only an open inline editor follows the view.
     updateViewport(`${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.offsetLeft}:${state.offsetTop}:${state.width}:${state.height}`);
   }), [api]);
   useEffect(() => {

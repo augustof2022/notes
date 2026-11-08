@@ -6,6 +6,7 @@ import { LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { lockedObjects, type LockedObject } from '../lib/object-locks';
 import { boardObjects, chosenObjects, selectedObjectKeys } from '../lib/board-objects';
 import { setObjectsLocked } from '../lib/object-lock-scene';
+import { contentFingerprint } from '../lib/canvas-signature';
 import { Modal } from './Modal';
 
 export function LockedObjectsControl({ api, root }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null }) {
@@ -15,12 +16,17 @@ export function LockedObjectsControl({ api, root }: { api: ExcalidrawImperativeA
   const [selection, setSelection] = useState({ ids: [] as string[], locked: false, disabled: false });
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-unlock"]') || null); }, [root]);
   useEffect(() => {
+    let last = '';
     const update = () => {
       const state = api.getAppState();
       if (state.cursorButton === 'down') {
+        last = '';
         setSelection(previous => previous.disabled ? previous : { ...previous, disabled: true });
         return;
       }
+      const key = `${contentFingerprint(api.getSceneElements())}|${JSON.stringify([state.selectedElementIds, state.selectedGroupIds])}|${state.viewModeEnabled}|${!!state.newElement}`;
+      if (key === last) return; // Pan and zoom change nothing this control shows.
+      last = key;
       const next = lockedObjects(api.getSceneElements());
       setObjects(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
       const elements = api.getSceneElements(), tree = boardObjects(elements);
