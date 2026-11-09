@@ -12,6 +12,10 @@ export interface DiagramPreset {
   defaultText: string;
   system: DiagramSystemId;
   doubleOutline?: boolean;
+  /** Rectangle with rounded corners. */
+  rounded?: boolean;
+  /** Keep width and height equal (square, circle). */
+  equal?: boolean;
 }
 
 export interface DiagramSystem {
@@ -19,6 +23,8 @@ export interface DiagramSystem {
   label: string;
   description: string;
   presets: readonly DiagramPreset[];
+  /** New branches copy the selected shape instead of asking which shape to add. */
+  branchSameShape?: boolean;
 }
 
 export const DIAGRAM_SYSTEMS: readonly DiagramSystem[] = [
@@ -55,8 +61,15 @@ export const DIAGRAM_SYSTEMS: readonly DiagramSystem[] = [
     presets: [{ id: 'role', label: 'Role', type: 'rectangle', width: 200, height: 100, defaultText: 'Name\nRole', system: 'org' }],
   },
   {
-    id: 'mindmap', label: 'Mind map', description: 'Topics and branches for organizing ideas.',
-    presets: [{ id: 'topic', label: 'Topic', type: 'ellipse', width: 180, height: 90, defaultText: 'Topic', system: 'mindmap' }],
+    id: 'mindmap', label: 'Mind map', description: 'Topics and branches for organizing ideas.', branchSameShape: true,
+    presets: [
+      { id: 'topic', label: 'Oval', type: 'ellipse', width: 180, height: 90, defaultText: 'Topic', system: 'mindmap' },
+      { id: 'box', label: 'Box', type: 'rectangle', width: 180, height: 90, defaultText: 'Topic', system: 'mindmap' },
+      { id: 'rounded', label: 'Rounded box', type: 'rectangle', width: 180, height: 90, defaultText: 'Topic', system: 'mindmap', rounded: true },
+      { id: 'square', label: 'Square', type: 'rectangle', width: 130, height: 130, defaultText: 'Topic', system: 'mindmap', equal: true },
+      { id: 'circle', label: 'Circle', type: 'ellipse', width: 130, height: 130, defaultText: 'Topic', system: 'mindmap', equal: true },
+      { id: 'diamond', label: 'Diamond', type: 'diamond', width: 180, height: 120, defaultText: 'Topic', system: 'mindmap' },
+    ],
   },
 ];
 

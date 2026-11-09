@@ -77,6 +77,9 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   // Pan and zoom fire onChange for every frame without changing any element.
   // Remember the last content so those frames skip repairs and deep copies.
   const lastSelection = useRef<AppState['selectedElementIds'] | null>(null);
+  // Repairs that never settle (two layouts disagreeing) would otherwise loop
+  // until React aborts and the board goes blank. Stop after a burst instead.
+  const repairStreak = useRef({ count: 0, since: 0, warned: false });
   const lastContent = useRef<{ key: string; signature: string; stored: readonly ExcalidrawElement[] | null } | null>(null);
   const savesInFlight = useRef(0);
   const booted = useRef(false);
@@ -149,6 +152,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
         if (!originals.has(element)) originals.set(element, { ...element });
         return mutateElement(element, updates, informMutation, options);
       };
+      const incoming = elements;
       repaired = repairDiagramElements(elements, state, repairElement);
       const rich = repairRichTextElements(elements, state.editingTextElement?.id, repairElement);
       elements = rich.elements;
@@ -172,6 +176,15 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
         if (include && !element.isDeleted) selectedElementIds[element.id] = true; else delete selectedElementIds[element.id];
       }
       const selectionChanged = JSON.stringify(selectedElementIds) !== JSON.stringify(state.selectedElementIds);
+      if (repaired) {
+        const streak = repairStreak.current, now = performance.now();
+        if (now - streak.since > 1000) { streak.count = 0; streak.since = now; }
+        if (++streak.count > 30) {
+          // repairedSceneElements already restored the live objects; drop this pass.
+          repaired = false; elements = incoming;
+          if (!streak.warned) { streak.warned = true; console.warn('Note: stopped repeating board repairs that did not settle.'); }
+        }
+      } else repairStreak.current.count = 0;
       previousTool.current = state.activeTool.type;
       correcting.current = true;
       try {

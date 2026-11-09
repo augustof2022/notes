@@ -53,8 +53,14 @@ export function applyRichText(text: ExcalidrawTextElement, doc: RichDoc, color: 
 export function repairRichTextElements(input: readonly ExcalidrawElement[], editingId?: string, mutate = mutateElement) {
   const elements = [...input], files: BinaryFileData[] = [], byId = new Map(elements.map(element => [element.id, element]));
   const owners = new Set<string>(); let changed = false;
+  // Geometry differing by less than half a pixel is the same layout. The
+  // editor centers labels with slightly different math; treating those as
+  // changes made both sides correct each other forever.
+  const GEOMETRY = new Set(['x', 'y', 'width', 'height']);
+  const same = (key: string, current: unknown, next: unknown) => GEOMETRY.has(key) && typeof current === 'number' && typeof next === 'number'
+    ? Math.abs(current - next) < 0.5 : JSON.stringify(current) === JSON.stringify(next);
   function update(element: ExcalidrawElement, values: Record<string, any>) {
-    if (Object.entries(values).every(([key, value]) => JSON.stringify((element as any)[key]) === JSON.stringify(value))) return;
+    if (Object.entries(values).every(([key, value]) => same(key, (element as any)[key], value))) return;
     mutate(element, values, false); changed = true;
   }
   for (const source of [...elements]) {
@@ -88,7 +94,10 @@ export function repairRichTextElements(input: readonly ExcalidrawElement[], edit
       y = source.verticalAlign === 'top' ? top : source.verticalAlign === 'bottom' ? container.y + container.height - (top - container.y) - render.height : container.y + (container.height - render.height) / 2;
     }
     const angle = container && container.type !== 'arrow' ? container.angle : source.angle;
-    update(source, { x, y, width: render.width, height: render.height, angle, autoResize: false, strokeColor: 'transparent' });
+    // While a label is being edited the editor keeps laying it out itself;
+    // leave its box alone until editing ends, then place it once.
+    if (source.id === editingId && source.containerId) { x = source.x; y = source.y; update(source, { angle, autoResize: false, strokeColor: 'transparent' }); }
+    else update(source, { x, y, width: render.width, height: render.height, angle, autoResize: false, strokeColor: 'transparent' });
     const id = richRenderId(source.id); owners.add(id);
     const attrs = { x, y, width: render.width, height: render.height, angle, opacity: source.id === editingId ? 0 : source.opacity,
       groupIds: source.groupIds, frameId: source.frameId, locked: true, fileId: render.file.id, isDeleted: false,

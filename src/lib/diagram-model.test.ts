@@ -157,3 +157,13 @@ describe('connection endpoints and routing', () => {
     }
   });
 });
+
+describe('mind map shapes', () => {
+  it('offers oval, box, rounded box, square, circle, and diamond, and branches copy the current shape', () => {
+    const mindmap = DIAGRAM_SYSTEMS.find(system => system.id === 'mindmap')!;
+    expect(mindmap.presets.map(preset => preset.label)).toEqual(['Oval', 'Box', 'Rounded box', 'Square', 'Circle', 'Diamond']);
+    expect(mindmap.presets.find(preset => preset.id === 'topic')?.type).toBe('ellipse'); // existing boards keep their ovals
+    expect(mindmap.presets.filter(preset => preset.equal).every(preset => preset.width === preset.height)).toBe(true);
+    expect(mindmap.branchSameShape).toBe(true);
+  });
+});

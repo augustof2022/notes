@@ -139,6 +139,9 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (data?.kind !== 'node') return;
     const palette = DIAGRAM_SYSTEMS.find(item => item.id === data.system)!;
     if (palette.presets.length === 1) { addRelated(relation); return; }
+    // Mind maps grow fastest when a branch copies its parent's shape; change a
+    // shape afterwards with Edit shape.
+    if (palette.branchSameShape) { addRelated(relation, true); return; }
     setSystem(data.system); setPresetId(data.shapeId); setPendingRelation(relation); setPanel(true);
   }
   function applyShape() {

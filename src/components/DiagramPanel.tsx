@@ -64,12 +64,12 @@ const MARKERS = [
   { value: 'crowfoot_one_or_many', label: 'One or many' },
 ];
 
-function ShapePreview({ type, doubleOutline }: { type: string; doubleOutline?: boolean }) {
+function ShapePreview({ type, doubleOutline, rounded, equal }: { type: string; doubleOutline?: boolean; rounded?: boolean; equal?: boolean }) {
   const shape = type === 'ellipse'
-    ? <ellipse cx="28" cy="21" rx="23" ry="15" />
+    ? equal ? <circle cx="28" cy="21" r="17" /> : <ellipse cx="28" cy="21" rx="23" ry="15" />
     : type === 'diamond'
       ? <path d="M28 3 53 21 28 39 3 21Z" />
-      : <rect x="5" y="6" width="46" height="30" rx={type === 'rectangle' ? 2 : 10} />;
+      : equal ? <rect x="11" y="4" width="34" height="34" rx="2" /> : <rect x="5" y="6" width="46" height="30" rx={rounded ? 9 : type === 'rectangle' ? 2 : 10} />;
   const inner = type === 'ellipse'
     ? <ellipse cx="28" cy="21" rx="19" ry="11" />
     : type === 'diamond'
@@ -160,7 +160,7 @@ export function DiagramPanel(props: DiagramPanelProps) {
           <p className="diagram-help">{system.description}</p>
           <div className="diagram-presets" role="group" aria-label={`${system.label} shapes`}>
             {system.presets.map(preset => <button type="button" key={preset.id} className="diagram-preset" aria-pressed={props.presetId === preset.id} onClick={() => props.onPresetChange(preset.id)}>
-              <ShapePreview type={preset.type} doubleOutline={preset.doubleOutline} />
+              <ShapePreview type={preset.type} doubleOutline={preset.doubleOutline} rounded={preset.rounded} equal={preset.equal} />
               <span>{preset.label}</span>
             </button>)}
           </div>

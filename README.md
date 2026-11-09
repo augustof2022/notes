@@ -2,14 +2,14 @@
 
 A browser app for infinite canvas notes, with nested folders and screenshot pasting. Built for Renz’s desktop workflow and prepared for GitHub Pages.
 
-Current release: **v0.18.1**. The app shows the installed version; About → Version updates contains the release history.
+Current release: **v0.18.2**. The app shows the installed version; About → Version updates contains the release history.
 
 ## What works
 
 - Google sign-in before opening the workspace. Continue with Google signs in or creates an account; a valid remembered Google-linked Note session restores the workspace and refreshes in the background.
 - Infinite boards: text, images, drawing, shapes, arrows, pan and zoom using the MIT-licensed Excalidraw editor. Pen strokes use fixed pressure, and text mode stays active for consecutive notes.
 - Board snapping: tap **Snap: Off → Elements → Grid → Off** in the canvas controls. Elements shows alignment guides and snaps nearby edges, centers, and spacing while dragging. Grid shows a visible grid and snaps placement to its cells. Tap the adjacent size button to adjust each board’s grid from 1–100 pixels (default 20); the mode and size are saved with the board. Existing items stay in place until moved. Pen strokes remain freehand.
-- Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
+- Diagram mode: visual presets for Chen ER, crow’s-foot ER, relational tables, business processes, organization charts, and mind maps. Mind maps offer oval, box, rounded box, square, circle, and diamond topics; Add child, Add sibling, and Tab copy the current topic’s shape, and **Edit shape** changes it while keeping its text, colors, and connections. Selected nodes offer Add sibling, Add child, and Add connection; connectors support attachment sides, editable routes, cardinality markers, colors, and diagram-scoped themes.
 - Persistent object connections: select an ordinary shape, text, image, drawing, line, or icon group and choose **Add connection**. Choose sides and tap a target; its line follows moves and resizes, with the same route, bend, marker, and style controls as diagram connections.
 - Object and group locks protect position, size, shape, and text until unlocked. Labels and diagram outlines lock with their object; locked items remain accessible through **Layers** or **Unlock objects**.
 - A hideable **Layers** sidebar shows objects and expandable groups from front to back, with real previews, search, multi-selection, Group/Ungroup, lock/unlock, and Find on board. Resize its left edge and adjust preview size for a compact overview or larger thumbnails. These controls remain available with the floating toolbars hidden.

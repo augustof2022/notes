@@ -43,3 +43,21 @@ it('keeps small standalone labels at their own width instead of a 360px default'
   expect(richTextWidth(small, [])).toBe(22);
   expect(richTextWidth({ ...small, width: 0 } as typeof small, [])).toBe(360);
 });
+
+const label = (patch: object = {}) => ({ id: 'label', type: 'text', containerId: 'node', x: 50, y: 58.3, width: 100, height: 24, fontSize: 18, angle: 0, groupIds: [], frameId: null, opacity: 100, textAlign: 'center', verticalAlign: 'middle', strokeColor: 'transparent', autoResize: false,
+  customData: { noteRichText: { version: 1, color: '#000000', doc } }, ...patch }) as unknown as ExcalidrawElement;
+const node = { id: 'node', type: 'rectangle', x: 0, y: 0, width: 200, height: 140, angle: 0, groupIds: [] } as unknown as ExcalidrawElement;
+
+it('does not fight the editor over sub-pixel label positions', () => {
+  // Centered y is (140 - 24) / 2 = 58; 58.3 is the same layout.
+  const first = repairRichTextElements([node, label()]);
+  expect(repairRichTextElements(first.elements).changed).toBe(false);
+  expect(first.elements.find(element => element.id === 'label')!.y).toBe(58.3);
+});
+
+it('leaves a label being edited where the editor put it, then centers it afterwards', () => {
+  const editing = repairRichTextElements([node, label({ y: 30 })], 'label');
+  expect(editing.elements.find(element => element.id === 'label')!.y).toBe(30);
+  const done = repairRichTextElements(editing.elements);
+  expect(done.elements.find(element => element.id === 'label')!.y).toBe(58);
+});

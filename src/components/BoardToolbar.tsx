@@ -71,7 +71,7 @@ export function BoardToolbar({ api, root, zoomLocked, onZoomLock, snapMode, grid
   const tool = (type: ToolType, title: string, Icon: LucideIcon, shortcut?: string, className = '') =>
     <button type="button" className={`note-tool ${className}`} aria-label={title} aria-pressed={is(type)} title={`${title}${shortcut ? ` (${shortcut})` : ''}`} onClick={event => choose(type, (event.nativeEvent as PointerEvent).pointerType)}><Icon size={18} /></button>;
   const item = (label: string, icon: ReactNode, onClick: () => void, options: { pressed?: boolean; hint?: string; className?: string } = {}) =>
-    <button type="button" role="menuitem" className={`note-menu-item ${options.className || ''}`} aria-pressed={options.pressed} onClick={onClick}>{icon}<span>{label}</span>{options.hint && <kbd>{options.hint}</kbd>}</button>;
+    <button key={label} type="button" role="menuitem" className={`note-menu-item ${options.className || ''}`} aria-pressed={options.pressed} onClick={onClick}>{icon}<span>{label}</span>{options.hint && <kbd>{options.hint}</kbd>}</button>;
   const current = SHAPES.find(entry => entry.type === shape)!, shapeActive = SHAPES.some(entry => is(entry.type));
   const ShapeIcon = shapeActive ? SHAPES.find(entry => is(entry.type))!.icon : current.icon;
   const sep = <span className="note-toolbar-sep" aria-hidden="true" />;

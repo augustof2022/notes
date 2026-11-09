@@ -85,7 +85,7 @@ export function createDiagramNode(
   const created = convertToExcalidrawElements([{
     id, type: preset.type, x: position.x, y: position.y, width: preset.width, height: preset.height,
     strokeColor: style.stroke, backgroundColor: style.fill, fillStyle: 'solid', strokeWidth: style.width,
-    strokeStyle: style.strokeStyle, roughness: 0, roundness: null, groupIds,
+    strokeStyle: style.strokeStyle, roughness: 0, roundness: presetRoundness(preset), groupIds,
     customData: { noteDiagram: data },
     label: { text: preset.defaultText, fontSize: 18, fontFamily: 2, strokeColor: textColor, textAlign: 'center', verticalAlign: 'middle' },
   }], { regenerateIds: false });
@@ -97,11 +97,14 @@ export function createDiagramNode(
     id: crypto.randomUUID(), type: preset.type, x: shape.x + OUTLINE_INSET, y: shape.y + OUTLINE_INSET,
     width: Math.max(1, shape.width - OUTLINE_INSET * 2), height: Math.max(1, shape.height - OUTLINE_INSET * 2),
     strokeColor: style.stroke, backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: style.width,
-    strokeStyle: style.strokeStyle, roughness: 0, roundness: null, groupIds,
+    strokeStyle: style.strokeStyle, roughness: 0, roundness: presetRoundness(preset), groupIds,
     customData: { noteDiagram: decorationData(data, id) },
   }], { regenerateIds: false });
   return [shape, outline, ...labels];
 }
+
+/** Rounded presets use the editor's adaptive corner radius. */
+export function presetRoundness(preset: Pick<DiagramPreset, 'rounded'>) { return preset.rounded ? { type: 3 as const } : null; }
 
 /** Keep the node identity, labels, hierarchy and arrow bindings during a shape change. */
 export function changeDiagramNodeShape(elements: readonly ExcalidrawElement[], nodeId: string, preset: DiagramPreset): ExcalidrawElement[] {
@@ -112,15 +115,18 @@ export function changeDiagramNodeShape(elements: readonly ExcalidrawElement[], n
   const text = elements.find(element => !element.isDeleted && element.type === 'text' && element.containerId === node.id);
   const groupIds = node.groupIds.length ? node.groupIds : preset.doubleOutline ? [crypto.randomUUID()] : [];
   const nextData: DiagramNodeData = { ...data, shapeId: preset.id };
+  // Squares and circles even out the current size; other shapes keep it.
+  const side = Math.round((node.width + node.height) / 2);
+  const width = preset.equal ? side : node.width, height = preset.equal ? side : node.height;
   // Let Excalidraw calculate the label's available area for the new geometry.
   const measured = convertToExcalidrawElements([{
-    type: preset.type, x: node.x, y: node.y, width: node.width, height: node.height,
+    type: preset.type, x: node.x, y: node.y, width, height,
     ...(text?.type === 'text' ? { label: { text: text.originalText, fontSize: text.fontSize, fontFamily: text.fontFamily, textAlign: text.textAlign, verticalAlign: text.verticalAlign } } : {}),
   }], { regenerateIds: false });
   const shape = measured[0];
   const measuredText = measured.find(element => element.type === 'text');
   const replacement = newElementWith(node, {
-    type: preset.type, width: shape.width, height: shape.height, roundness: null, groupIds,
+    type: preset.type, width: shape.width, height: shape.height, roundness: presetRoundness(preset), groupIds,
     customData: { ...node.customData, noteDiagram: nextData },
   });
   const result = elements.map(element => {
@@ -152,7 +158,7 @@ export function changeDiagramNodeShape(elements: readonly ExcalidrawElement[], n
       type: preset.type, x: node.x + OUTLINE_INSET, y: node.y + OUTLINE_INSET,
       width: Math.max(1, shape.width - OUTLINE_INSET * 2), height: Math.max(1, shape.height - OUTLINE_INSET * 2),
       angle: node.angle, strokeColor: node.strokeColor, backgroundColor: 'transparent',
-      strokeWidth: node.strokeWidth, strokeStyle: node.strokeStyle, roughness: node.roughness, roundness: null, groupIds,
+      strokeWidth: node.strokeWidth, strokeStyle: node.strokeStyle, roughness: node.roughness, roundness: presetRoundness(preset), groupIds,
       customData: { noteDiagram: decorationData(nextData, node.id) },
     }], { regenerateIds: false });
     result.splice(result.findIndex(element => element.id === node.id) + 1, 0, outline);
