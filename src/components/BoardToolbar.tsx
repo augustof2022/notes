@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { CaptureUpdateAction } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI, ToolType } from '@excalidraw/excalidraw/types';
-import { ArrowRight, BookOpen, ChevronDown, Circle, Diamond, EyeOff, Frame, GitBranch, Grid2X2, Hand, Image, Link, LockKeyhole, Magnet, Minus, MoreHorizontal, MousePointer2, Pencil, Radio, ScanText, Shapes, Square, Stamp, Type, UnlockKeyhole, type LucideIcon } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronDown, Circle, Diamond, EyeOff, Frame, GitBranch, Grid2X2, Hand, Image, Link, LockKeyhole, Magnet, Minus, MoreHorizontal, MousePointer2, Pencil, Radio, ScanText, Scissors, Shapes, Square, Stamp, Type, UnlockKeyhole, type LucideIcon } from 'lucide-react';
 import { SnapControls } from './SnapControls';
 import type { SnapMode } from '../lib/snapping';
+import { canSnip } from '../lib/capture';
 import './board-toolbar.css';
 
 type ShapeType = 'rectangle' | 'diamond' | 'ellipse' | 'arrow' | 'line';
@@ -92,6 +93,7 @@ export function BoardToolbar({ api, root, zoomLocked, onZoomLock, snapMode, grid
     </div>
     {sep}
     {tool('image', 'Image', Image, '9')}
+    <div className="note-toolbar-slot" data-toolbar-slot="actions-capture" />
     <div className="note-toolbar-slot note-wide-only" data-toolbar-slot="actions-stamps" />
     <div className="note-toolbar-slot note-wide-only" data-toolbar-slot="actions-diagrams" />
     {sep}
@@ -99,6 +101,7 @@ export function BoardToolbar({ api, root, zoomLocked, onZoomLock, snapMode, grid
       <button type="button" className="note-tool" aria-label="More tools and options" aria-haspopup="menu" aria-expanded={open === 'more'} title="More tools, view, and board options" onClick={() => setOpen(open === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
       <div className="note-popover note-more-panel" role="menu" aria-label="More" data-open={open === 'more'} onClick={event => { if ((event.target as Element).closest('.note-menu-item, .note-toolbar-slot button:not([aria-haspopup="dialog"]):not(.snap-mode-button)')) setOpen(null); }}>
         <p className="note-menu-heading">Insert</p>
+        {compact && canSnip() && item('Snip from screen', <Scissors size={17} />, () => press('.capture-snip-trigger'))}
         {compact && item('Icon stamp', <Stamp size={17} />, () => press('.icon-stamp-trigger'), { hint: 'I' })}
         {compact && item('Choose stamp icon', <Stamp size={17} />, () => press('.icon-stamp-picker-trigger'))}
         {compact && item('Diagrams', <Shapes size={17} />, () => press('.diagram-mode-button'))}
