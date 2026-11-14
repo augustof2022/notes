@@ -4,6 +4,9 @@
 .capture-hint>span{min-width:0}
 .capture-hint button{display:grid;place-items:center;flex:none;min-width:36px;min-height:36px;border-radius:6px;color:var(--accent)}
 .capture-hint button:hover{background:var(--accent-light)}
+.capture-hint kbd{font-size:10px}
+.capture-hint small{display:block;color:var(--muted);font-size:10px}
+.capture-hint .capture-hint-text{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:11px;white-space:nowrap}
 .board-canvas:has(>.excalidraw--mobile)>.capture-hint{bottom:84px}
 @media(pointer:coarse) and (not (any-pointer:fine)){.capture-esc{display:none}}
 

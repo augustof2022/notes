@@ -99,3 +99,38 @@ export async function imageFileId(blob: Blob) {
   const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
   return Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
+
+export type SystemSnip = 'windows' | 'mac' | 'other';
+type PlatformNavigator = { userAgent?: string; platform?: string; userAgentData?: { platform?: string } } | undefined;
+
+/** Which built-in screenshot tool can hand a snip to Note through the clipboard. */
+export function systemSnip(nav: PlatformNavigator = globalThis.navigator as PlatformNavigator): SystemSnip {
+  const platform = `${nav?.userAgentData?.platform || ''} ${nav?.platform || ''} ${nav?.userAgent || ''}`;
+  if (/Windows|Win32|Win64/i.test(platform)) return 'windows';
+  if (/Mac/i.test(platform) && !/iPhone|iPad/i.test(platform)) return 'mac';
+  return 'other';
+}
+
+/** X snips (like cut), C takes a photo. Plain keys only, so Ctrl+X and Ctrl+C keep working. */
+export function captureShortcut(event: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; repeat?: boolean; isComposing?: boolean; defaultPrevented?: boolean }): CaptureMode | null {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.repeat || event.isComposing || event.defaultPrevented) return null;
+  const key = event.key.toLowerCase();
+  return key === 'x' ? 'snip' : key === 'c' ? 'camera' : null;
+}
+
+/**
+ * Accept a clipboard picture as the new snip only when it is not the picture
+ * that was already there. Without a baseline, require that the screenshot
+ * overlay took focus first, so an old clipboard image is not inserted.
+ */
+export function isNewSnip(hash: string, baseline: string | null | undefined, overlayOpened: boolean) {
+  return baseline === undefined ? overlayOpened : hash !== baseline;
+}
+
+/** How long Note waits for a snip before giving up. */
+export const SNIP_WAIT_MS = 2 * 60 * 1000;
+
+let externalLaunchAt = 0;
+/** Opening the Windows snip link looks like leaving the page; skip the leave warning briefly. */
+export function markExternalLaunch(now = Date.now()) { externalLaunchAt = now; }
+export function recentExternalLaunch(now = Date.now()) { return now - externalLaunchAt < 2000; }

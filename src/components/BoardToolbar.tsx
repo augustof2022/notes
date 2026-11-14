@@ -101,7 +101,7 @@ export function BoardToolbar({ api, root, zoomLocked, onZoomLock, snapMode, grid
       <button type="button" className="note-tool" aria-label="More tools and options" aria-haspopup="menu" aria-expanded={open === 'more'} title="More tools, view, and board options" onClick={() => setOpen(open === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
       <div className="note-popover note-more-panel" role="menu" aria-label="More" data-open={open === 'more'} onClick={event => { if ((event.target as Element).closest('.note-menu-item, .note-toolbar-slot button:not([aria-haspopup="dialog"]):not(.snap-mode-button)')) setOpen(null); }}>
         <p className="note-menu-heading">Insert</p>
-        {compact && canSnip() && item('Snip from screen', <Scissors size={17} />, () => press('.capture-snip-trigger'))}
+        {compact && canSnip() && item('Snip from screen', <Scissors size={17} />, () => press('.capture-snip-trigger'), { hint: 'X' })}
         {compact && item('Icon stamp', <Stamp size={17} />, () => press('.icon-stamp-trigger'), { hint: 'I' })}
         {compact && item('Choose stamp icon', <Stamp size={17} />, () => press('.icon-stamp-picker-trigger'))}
         {compact && item('Diagrams', <Shapes size={17} />, () => press('.diagram-mode-button'))}

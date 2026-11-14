@@ -2,16 +2,48 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import { createPortal, flushSync } from 'react-dom';
 import { CaptureUpdateAction, convertToExcalidrawElements } from '@excalidraw/excalidraw';
 import type { BinaryFileData, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import { Camera, Loader2, Maximize2, RefreshCw, Scissors, ScreenShareOff, SwitchCamera, X } from 'lucide-react';
+import { AppWindow, Camera, Loader2, Maximize2, RefreshCw, Scissors, ScreenShareOff, SwitchCamera, X } from 'lucide-react';
 import { blobToDataURL } from '../lib/assets';
 import { stampGridTranslation, stampScenePoint } from '../lib/stamp-placement';
-import { boardImageSize, CAPTURE_TOOL, canSnip, clampPoint, cropFromSelection, dragRect, fitFrame, fitWithin, imageFileId, isCaptureCancel, isCaptureTool, SHARE_IDLE_MS, shareLabel, usesNativeCamera, type CaptureMode, type Point, type Rect, type Size } from '../lib/capture';
+import { boardImageSize, CAPTURE_TOOL, canSnip, captureShortcut, clampPoint, cropFromSelection, dragRect, fitFrame, fitWithin, imageFileId, isCaptureCancel, isCaptureTool, isNewSnip, markExternalLaunch, SHARE_IDLE_MS, shareLabel, SNIP_WAIT_MS, systemSnip, usesNativeCamera, type CaptureMode, type Point, type Rect, type Size } from '../lib/capture';
 import './capture-tools.css';
 
 /** Chrome and Edge keep focus on Note after the picker instead of jumping to the shared window. */
 type FocusController = { setFocusBehavior?: (behavior: 'focus-captured-surface' | 'no-focus-change') => void };
 type CaptureControllerClass = new () => FocusController;
 interface Share { stream: MediaStream; video: HTMLVideoElement; label: string }
+/** Waiting for the system screenshot tool to put a snip on the clipboard. */
+interface SnipWait { at: Point; baseline: string | null | undefined; opened: boolean; reading: boolean; blocked: boolean }
+
+async function readClipboardImage() {
+  if (typeof navigator.clipboard?.read !== 'function') throw Object.assign(new Error('Clipboard reading is unavailable.'), { name: 'NotSupportedError' });
+  for (const item of await navigator.clipboard.read()) {
+    const type = item.types.find(entry => entry.startsWith('image/'));
+    if (type) { const blob = await item.getType(type); return { blob, hash: await imageFileId(blob) }; }
+  }
+  return null;
+}
+/** Denied, unsupported, or not permitted: the snip then arrives with Ctrl+V instead. */
+async function clipboardBlocked(error: unknown) {
+  const name = (error as { name?: string } | null)?.name;
+  if (name === 'NotSupportedError' || name === 'TypeError') return true;
+  try { return (await navigator.permissions.query({ name: 'clipboard-read' as PermissionName })).state === 'denied'; } catch { return name === 'NotAllowedError'; }
+}
+/** Open Windows' own snip overlay (the one Win+Shift+S opens). It copies the snip to the clipboard. */
+function openWindowsSnip() {
+  markExternalLaunch();
+  const link = document.createElement('a'); link.href = 'ms-screenclip:'; link.rel = 'noopener'; link.click();
+}
+async function pictureSize(blob: Blob): Promise<Size> {
+  const bitmap = await createImageBitmap(blob);
+  try { return { width: bitmap.width, height: bitmap.height }; } finally { bitmap.close(); }
+}
+function typingOrDialog(target: EventTarget | null, root: HTMLElement) {
+  if (!(target instanceof HTMLElement) || (target !== document.body && !root.contains(target))) return true;
+  if (target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return true;
+  return [...document.querySelectorAll<HTMLElement>('.modal-backdrop,[role="dialog"][aria-modal="true"],dialog[open]')]
+    .some(element => !element.closest('.excalidraw') && element.getClientRects().length > 0);
+}
 
 const errorText = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback;
 const canvasBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) => new Promise<Blob>((resolve, reject) =>
@@ -56,6 +88,8 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const [viewfinder, setViewfinder] = useState<Point | null>(null);
   const [shared, setShared] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState<{ token: number; blocked: boolean } | null>(null);
+  const wait = useRef<SnipWait | null>(null);
   const modeRef = useRef<CaptureMode | null>(null);
   const share = useRef<Share | null>(null);
   const idle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -63,7 +97,7 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const photoInput = useRef<HTMLInputElement>(null);
   const starting = useRef(false);
   const live = useRef({ onMessage }); live.current = { onMessage };
-  const snipSupported = canSnip();
+  const snipSupported = canSnip(), screenshotTool = systemSnip();
 
   useLayoutEffect(() => { setHost(root?.querySelector('[data-toolbar-slot="actions-capture"]') || null); }, [root]);
   useEffect(() => api.onChange((_elements, state) => {
@@ -72,7 +106,7 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
     if (armed && !state.activeTool.locked) api.updateScene({ appState: { activeTool: { ...state.activeTool, locked: true } }, captureUpdate: CaptureUpdateAction.NEVER });
     if (!armed && modeRef.current) { modeRef.current = null; setMode(null); }
   }), [api]);
-  useEffect(() => () => { stopShare(); }, []);
+  useEffect(() => () => { stopShare(); wait.current = null; }, []);
 
   function focusBoard() { root?.querySelector<HTMLElement>('.excalidraw')?.focus(); }
   function arm(next: CaptureMode) {
@@ -142,6 +176,47 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
     } catch (error) { live.current.onMessage(`Could not add the snip: ${errorText(error, 'please try again')}`); }
   }
 
+  function endWait() { wait.current = null; setWaiting(null); }
+  /** Snip with the computer's own screenshot tool, then pick the snip up from the clipboard. */
+  function beginSystemSnip(at: Point) {
+    const current: SnipWait = { at, baseline: undefined, opened: false, reading: false, blocked: false };
+    wait.current = current; setWaiting({ token: Date.now(), blocked: false });
+    // Remember what is already on the clipboard so it is never mistaken for the new snip.
+    current.reading = true;
+    readClipboardImage().then(image => { if (wait.current === current && !current.opened) current.baseline = image?.hash ?? null; })
+      .catch(error => clipboardBlocked(error).then(blocked => { if (blocked && wait.current === current) { current.blocked = true; setWaiting({ token: Date.now(), blocked: true }); } }))
+      .finally(() => { current.reading = false; });
+    if (screenshotTool === 'windows') openWindowsSnip();
+  }
+  function placeWaitingSnip(blob: Blob) {
+    const current = wait.current; if (!current) return;
+    endWait(); focusBoard();
+    void pictureSize(blob).then(size => insertPicture(blob, size, current.at))
+      .catch(error => live.current.onMessage(`Could not add the snip: ${errorText(error, 'please try again')}`));
+  }
+  useEffect(() => {
+    const current = wait.current; if (!waiting || !current) return;
+    const opened = () => { current.opened = true; };
+    const poll = () => {
+      if (wait.current !== current || current.reading || current.blocked || !document.hasFocus()) return;
+      if (current.baseline === undefined && !current.opened) return;
+      current.reading = true;
+      readClipboardImage().then(image => { if (wait.current === current && image && isNewSnip(image.hash, current.baseline, current.opened)) placeWaitingSnip(image.blob); })
+        .catch(error => clipboardBlocked(error).then(blocked => { if (blocked && wait.current === current) { current.blocked = true; setWaiting({ token: Date.now(), blocked: true }); } }))
+        .finally(() => { current.reading = false; });
+    };
+    // Window capture runs before the board's own paste handler, which would center the picture.
+    const paste = (event: ClipboardEvent) => {
+      const image = Array.from(event.clipboardData?.files || []).find(file => file.type.startsWith('image/'));
+      if (!image || wait.current !== current) return;
+      event.preventDefault(); event.stopImmediatePropagation(); placeWaitingSnip(image);
+    };
+    const interval = setInterval(poll, 250);
+    const timeout = setTimeout(() => { if (wait.current === current) { endWait(); live.current.onMessage('Stopped waiting for a snip. Press X to snip again.'); } }, SNIP_WAIT_MS);
+    window.addEventListener('blur', opened); window.addEventListener('focus', poll); window.addEventListener('paste', paste, true);
+    return () => { clearInterval(interval); clearTimeout(timeout); window.removeEventListener('blur', opened); window.removeEventListener('focus', poll); window.removeEventListener('paste', paste, true); };
+  }, [waiting?.token]);
+
   async function insertPicture(blob: Blob, size: Size, at: Point) {
     const id = await imageFileId(blob) as BinaryFileData['id'];
     api.addFiles([{ id, dataURL: await blobToDataURL(blob) as BinaryFileData['dataURL'], mimeType: blob.type as BinaryFileData['mimeType'], created: Date.now() }]);
@@ -161,7 +236,7 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
   function place(client: Point) {
     const current = modeRef.current; if (!current) return;
     const at = stampScenePoint(client, api.getAppState());
-    if (current === 'snip') startSnip(at);
+    if (current === 'snip') beginSystemSnip(at);
     else if (usesNativeCamera()) { photoAt.current = at; photoInput.current?.click(); }
     else setViewfinder(at);
     // Let the editor finish its own pointer-up before switching tools.
@@ -173,7 +248,11 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
     let candidate: { id: number; x: number; y: number; moved: boolean } | null = null;
     const pointers = new Set<number>();
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && modeRef.current && isCaptureTool(api.getAppState().activeTool)) { event.preventDefault(); event.stopImmediatePropagation(); disarm(); }
+      if (event.key === 'Escape' && modeRef.current && isCaptureTool(api.getAppState().activeTool)) { event.preventDefault(); event.stopImmediatePropagation(); disarm(); return; }
+      if (event.key === 'Escape' && wait.current) { event.preventDefault(); event.stopImmediatePropagation(); endWait(); return; }
+      const shortcut = captureShortcut(event), state = api.getAppState();
+      if (!shortcut || (shortcut === 'snip' && !canSnip()) || typingOrDialog(event.target, root) || state.editingTextElement || state.openDialog || state.viewModeEnabled || state.contextMenu) return;
+      event.preventDefault(); event.stopImmediatePropagation(); arm(shortcut);
     };
     const down = (event: PointerEvent) => {
       if (!(event.target instanceof HTMLCanvasElement) || !root.contains(event.target)) return;
@@ -209,19 +288,27 @@ export function CaptureTools({ api, root, onMessage }: { api: ExcalidrawImperati
   }, [api, root]);
 
   const hint = mode === 'snip'
-    ? <>Click or tap the board where the snip goes{shared ? <> · sharing {shared}</> : <> · then choose the window to snip</>}</>
+    ? <>Click where the snip goes, then drag over anything on your screen</>
     : <>Click or tap the board where the photo goes</>;
+  const waitingText = waiting?.blocked
+    ? <>Snip with {screenshotTool === 'mac' ? <kbd>⌘ Ctrl Shift 4</kbd> : <kbd>Win Shift S</kbd>}, then press <kbd>Ctrl V</kbd> here. It lands where you clicked.</>
+    : screenshotTool === 'windows' ? <>Drag over what you want. It lands where you clicked. <small>No snip overlay? Press <kbd>Win Shift S</kbd>.</small></>
+    : screenshotTool === 'mac' ? <>Press <kbd>⌘ Ctrl Shift 4</kbd> and drag. It lands where you clicked.</>
+    : <>Copy a screenshot to the clipboard, or press <kbd>Ctrl V</kbd>. It lands where you clicked.</>;
   return <>
     {host && createPortal(<>
       {snipSupported && <button type="button" className="capture-snip-trigger note-wide-only" aria-pressed={mode === 'snip'} aria-label="Snip from screen"
-        title="Snip from screen: click the board where it goes, then drag over any window" onClick={() => arm('snip')}><Scissors size={18} /></button>}
+        aria-keyshortcuts="X" title="Snip (X): click the board where it goes, then drag over anything on your screen" onClick={() => arm('snip')}><Scissors size={18} /></button>}
       <button type="button" className="capture-camera-trigger" aria-pressed={mode === 'camera'} aria-label="Take a photo"
-        title="Camera: click the board where the photo goes, then take a picture" onClick={() => arm('camera')}><Camera size={18} /></button>
+        aria-keyshortcuts="C" title="Camera (C): click the board where the photo goes, then take a picture" onClick={() => arm('camera')}><Camera size={18} /></button>
     </>, host)}
     <input ref={photoInput} className="capture-photo-input" type="file" accept="image/*" capture="environment" tabIndex={-1} aria-hidden="true"
       onChange={event => { const file = event.target.files?.[0], at = photoAt.current; event.target.value = ''; photoAt.current = null; if (file && at) void addPhoto(file, at); }} />
     {mode && <div className="capture-hint" role="status">{mode === 'snip' ? <Scissors size={16} /> : <Camera size={16} />}<span>{hint}.<span className="capture-esc"> Esc cancels.</span></span>
       <button type="button" aria-label="Cancel" title="Cancel (Esc)" onClick={() => disarm()}><X size={17} /></button></div>}
+    {!mode && waiting && <div className="capture-hint capture-waiting-hint" role="status"><Scissors size={16} /><span>{waitingText}</span>
+      {snipSupported && <button type="button" className="capture-hint-text" title="Share a window and snip it inside Note instead" onClick={() => { const at = wait.current?.at; endWait(); if (at) startSnip(at); }}><AppWindow size={16} /><span>Snip a window</span></button>}
+      <button type="button" aria-label="Cancel snip" title="Cancel (Esc)" onClick={() => { endWait(); focusBoard(); }}><X size={17} /></button></div>}
     {!mode && busy && <div className="capture-hint" role="status"><Loader2 className="spinning" size={16} /><span>Choose a window or screen to snip in the browser's picker.</span></div>}
     {!mode && !busy && !snip && shared && <div className="capture-share-pill" role="status"><Scissors size={14} /><span>Snip is ready · sharing {shared}</span>
       <button type="button" onClick={stopShare} title="Stop sharing your screen with Note"><ScreenShareOff size={15} /><span>Stop</span></button></div>}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardImageSize, canSnip, clampPoint, cropFromSelection, dragRect, fitFrame, fitWithin, imageFileId, isCaptureCancel, isCaptureTool, shareLabel, usesNativeCamera } from './capture';
+import { boardImageSize, canSnip, captureShortcut, clampPoint, cropFromSelection, dragRect, fitFrame, fitWithin, imageFileId, isCaptureCancel, isCaptureTool, isNewSnip, markExternalLaunch, recentExternalLaunch, shareLabel, systemSnip, usesNativeCamera } from './capture';
 
 describe('capture tool detection', () => {
   it('recognizes only its own custom tool', () => {
@@ -71,5 +71,34 @@ describe('capture messages and ids', () => {
     const a = await imageFileId(new Blob([new Uint8Array([1, 2, 3])]));
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(await imageFileId(new Blob([new Uint8Array([1, 2, 3])]))).toBe(a);
+  });
+});
+
+describe('system snip and shortcuts', () => {
+  it('detects the screenshot tool by platform', () => {
+    expect(systemSnip({ userAgentData: { platform: 'Windows' } })).toBe('windows');
+    expect(systemSnip({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('windows');
+    expect(systemSnip({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)' })).toBe('mac');
+    expect(systemSnip({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('other');
+  });
+  it('uses plain X for Snip and C for Camera, leaving Ctrl+X and Ctrl+C alone', () => {
+    expect(captureShortcut({ key: 'x' })).toBe('snip');
+    expect(captureShortcut({ key: 'C' })).toBe('camera');
+    expect(captureShortcut({ key: 'x', ctrlKey: true })).toBeNull();
+    expect(captureShortcut({ key: 'c', metaKey: true })).toBeNull();
+    expect(captureShortcut({ key: 'x', repeat: true })).toBeNull();
+    expect(captureShortcut({ key: 'v' })).toBeNull();
+  });
+  it('ignores the picture that was already on the clipboard', () => {
+    expect(isNewSnip('a', 'a', true)).toBe(false);
+    expect(isNewSnip('b', 'a', false)).toBe(true);
+    expect(isNewSnip('b', null, false)).toBe(true);
+    expect(isNewSnip('b', undefined, false)).toBe(false);
+    expect(isNewSnip('b', undefined, true)).toBe(true);
+  });
+  it('remembers an external launch for a moment', () => {
+    markExternalLaunch(1000);
+    expect(recentExternalLaunch(2500)).toBe(true);
+    expect(recentExternalLaunch(3500)).toBe(false);
   });
 });
