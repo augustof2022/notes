@@ -18,6 +18,7 @@ import { BoardFind } from './BoardFind';
 import { AskAiTools } from './AskAiTools';
 import { ObjectColors } from './ObjectColors';
 import { StampTools } from './StampTools';
+import { CaptureTools } from './CaptureTools';
 import { WritingTools, type WritingHandle } from './WritingTools';
 import { RichTextTools, type RichTextHandle } from './RichTextTools';
 import { applyRichText, repairRichTextElements, richTextForStorage } from '../lib/rich-text-scene';
@@ -355,6 +356,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <BoardFind api={api} root={canvasRoot} scope={board.scope} zoomLocked={() => !!viewLock.current} />}
     {api && ready && <ObjectColors api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}
+    {api && ready && <CaptureTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools ref={writing} api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <RichTextTools ref={richText} api={api} root={canvasRoot} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
