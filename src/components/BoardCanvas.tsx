@@ -19,6 +19,7 @@ import { AskAiTools } from './AskAiTools';
 import { ObjectColors } from './ObjectColors';
 import { StampTools } from './StampTools';
 import { CaptureTools } from './CaptureTools';
+import { recentExternalLaunch } from '../lib/capture';
 import { WritingTools, type WritingHandle } from './WritingTools';
 import { RichTextTools, type RichTextHandle } from './RichTextTools';
 import { applyRichText, repairRichTextElements, richTextForStorage } from '../lib/rich-text-scene';
@@ -269,7 +270,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   useEffect(() => {
     const flushOnHide = () => { if (document.visibilityState === 'hidden') void flush().catch(() => {}); };
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (pending.current || savesInFlight.current || writing.current?.busy() || draftVersion.current !== savedDraftVersion.current) event.preventDefault();
+      // Opening the Windows snip overlay looks like leaving the page, but Note stays open.
+      if (!recentExternalLaunch() && (pending.current || savesInFlight.current || writing.current?.busy() || draftVersion.current !== savedDraftVersion.current)) event.preventDefault();
       if (pending.current || richText.current?.hasDraft()) void flush(false).catch(() => {});
     };
     document.addEventListener('visibilitychange', flushOnHide); window.addEventListener('beforeunload', beforeUnload);
