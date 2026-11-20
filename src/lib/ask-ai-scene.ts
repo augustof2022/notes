@@ -28,37 +28,18 @@ export function askSelection(elements: readonly ExcalidrawElement[], selected: R
   return { texts, images, skippedImages, anchor };
 }
 
-const TERM = /\[\[([^\][\n]{1,60})\]\]/g;
-
-/** The [[marked]] terms of an answer, first appearance first, without repeats (case-insensitive). */
-export function answerTerms(text: string, limit = 8): string[] {
-  const seen = new Set<string>(), terms: string[] = [];
-  for (const [, raw] of text.matchAll(TERM)) {
-    const term = raw.replace(/\s+/g, ' ').trim(), key = term.toLowerCase();
-    if (!term || seen.has(key)) continue;
-    seen.add(key); terms.push(term);
-    if (terms.length >= limit) break;
-  }
-  return terms;
+/** Markdown for the answer note, with up to five linked sources from Google Search. */
+export function answerMarkdown(answer: AskAnswer) {
+  const sources = answer.sources.map(source => `[${source.title.replace(/[[\]]/g, '')}](${source.url})`);
+  return `${answer.text.trim()}${sources.length ? `\n\n*Sources:* ${sources.join(' · ')}` : ''}`;
 }
-
-/** Marked terms show in bold on the board; the brackets are only a signal for the app. */
-export const boldTerms = (text: string) => text.replace(TERM, (_, term: string) => `**${term.trim()}**`);
 
 /**
- * Markdown for the answer note, with up to five linked sources from Google
- * Search. A clicked term gets its name as a heading; a question typed in the
- * Learn panel (not written on the board) is shown above its answer.
+ * Kept on AI notes. For Explain/Ask, `parentId` links each node to the one it
+ * came from (answer → selection node → source), so later questions carry the
+ * thread as context; `role` tells the selection node from the answer.
  */
-export function answerMarkdown(answer: AskAnswer, header: { term?: string; question?: string } = {}) {
-  const sources = answer.sources.map(source => `[${source.title.replace(/[[\]]/g, '')}](${source.url})`);
-  const top = header.term ? `### ${header.term.replace(/[#*[\]]/g, '')}\n\n` : header.question ? `**Q:** ${header.question.replace(/\n+/g, ' ').trim()}\n\n` : '';
-  return `${top}${boldTerms(answer.text.trim())}${sources.length ? `\n\n*Sources:* ${sources.join(' · ')}` : ''}`;
-}
-
-/** What the Learn panel records on an AI note to rebuild its thread. */
-export interface LearnData { provider: string; model: string; question: string; at: string; terms?: string[]; parentId?: string; term?: string }
-/** A page sent from the browser by the Note Learn helper. */
+export interface LearnData { provider?: string; model?: string; question: string; at: string; parentId?: string; role?: 'selection' | 'answer'; kind?: 'explain' | 'ask'; selection?: string; base?: number }/** A page sent from the browser by the Note Learn helper. */
 export interface LearnPage { title: string; url: string; text: string; selection?: string; at: string }
 
 /** Check a page sent by the browser helper and trim it before it goes on the board (only http/https pages). */
@@ -77,8 +58,13 @@ export const learnPage = (element: ExcalidrawElement | undefined): LearnPage | n
   const page = element?.customData?.noteLearnPage;
   return page && typeof page.url === 'string' && /^https?:\/\//i.test(page.url) && typeof page.text === 'string' ? page as LearnPage : null;
 };
-export const isLearnNote = (element: ExcalidrawElement | undefined) => !!element && element.type === 'text' && !element.isDeleted && !!(learnData(element) || learnPage(element));
-const noteText = (element: ExcalidrawElement) => element.type === 'text' ? (element.originalText || element.text).trim() : '';
+export const isLearnNote = (element: ExcalidrawElement | undefined) => !!element && !element.isDeleted && !!(learnData(element) || learnPage(element));
+/** The words in a note: its own text, or the text inside a shape. */
+export function noteText(element: ExcalidrawElement, elements: readonly ExcalidrawElement[] = []) {
+  if (element.type === 'text') return (element.originalText || element.text).trim();
+  const label = elements.find(item => item.type === 'text' && !item.isDeleted && item.containerId === element.id);
+  return label?.type === 'text' ? (label.originalText || label.text).trim() : '';
+}
 
 /** The notes from the thread's start down to this one (at most 8, guarding against loops). */
 export function threadPath(elements: readonly ExcalidrawElement[], id: string): ExcalidrawElement[] {
@@ -88,22 +74,15 @@ export function threadPath(elements: readonly ExcalidrawElement[], id: string): 
   return path;
 }
 
-/** A short name for a note in the thread trail. */
-export function threadLabel(element: ExcalidrawElement) {
-  const page = learnPage(element), data = learnData(element);
-  const label = page?.title || data?.term || data?.question || noteText(element).split('\n')[0] || 'Note';
-  return label.replace(/^#+\s*|\*\*/g, '').trim().slice(0, 40);
-}
-
 /**
  * Context for a question asked inside a thread: the page it started from (if
- * any) and the earlier notes on the way down, so a term is explained in the
- * sense of the topic it came from. Long texts are trimmed to keep requests quick.
+ * any) and the earlier notes on the way down, so selected words are explained
+ * in the sense of the topic they came from. Long texts are trimmed to keep requests quick.
  */
 export function threadContext(elements: readonly ExcalidrawElement[], id: string): string[] {
   const path = threadPath(elements, id), context: string[] = [];
   const page = path.map(learnPage).find(Boolean);
   if (page) context.push(`The page the person is reading: ${page.title} (${page.url})${page.selection ? `\nThey selected: ${page.selection.slice(0, 1500)}` : ''}\n\n${page.text.slice(0, 12000)}`);
-  for (const element of path) if (!learnPage(element)) context.push(noteText(element).slice(0, 1500));
+  for (const element of path) if (!learnPage(element)) context.push(noteText(element, elements).slice(0, 1500));
   return context.filter(Boolean);
 }

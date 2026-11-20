@@ -1,14 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CaptureUpdateAction, convertToExcalidrawElements } from '@excalidraw/excalidraw';
-import type { ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types';
+import { CaptureUpdateAction, convertToExcalidrawElements, mutateElement, newElementWith } from '@excalidraw/excalidraw';
+import type { ExcalidrawElement, ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucide-react';
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
 import { askGemini, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
-import { answerMarkdown, answerTerms, askSelection, isLearnNote, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { answerMarkdown, askSelection, isLearnNote, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { cleanSelection, LEARN_EDGE, LEARN_EVENT, LEARN_NODE, LEARN_SOURCE_LINE, learnBase, learnEdgeStyle, learnQuestion, placeRightOf, selectionNodeSize, selectionNodeText, type LearnSelection } from '../lib/explain-scene';
+import { connectionTarget } from '../lib/connection-targets';
+import { attachDiagramEdge, createObjectConnection } from '../lib/diagram-scene';
 import { FEYNMAN_INSTRUCTION, readAiInstruction, saveAiInstruction } from '../lib/ai-instruction';
 import { jotPlacement } from '../lib/jot-layout';
 import { applyRichText } from '../lib/rich-text-scene';
@@ -16,9 +19,9 @@ import { clipboardRichDoc, readRichText, richDocText } from '../lib/rich-text';
 import './ask-ai.css';
 
 type Dialog = { mode: 'setup' | 'unlock' | 'manage' | 'ask'; message?: string } | { mode: 'error'; message: string; key?: boolean; detail?: string } | null;
-interface Pending { request: AskRequest; anchorId: string | null; parentId?: string; header?: { term?: string; question?: string } }
-/** Sent by the Learn panel: explain a clicked term, or ask a follow-up, inside a note's thread. */
-export interface LearnAsk { parentId: string; question: string; term?: string }
+/** For Explain/Ask on selected words: the selection, and the node made for it once the key is ready. */
+interface Pending { request: AskRequest; anchorId: string | null; parentId?: string; learn?: LearnSelection & { nodeId?: string; added?: string[] } }
+export { LEARN_EVENT };
 
 /**
  * Ask AI writes Gemini's answer onto the board as a new note. Each account
@@ -34,9 +37,9 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
-    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnAsk>).detail; if (!detail?.parentId || !detail.question.trim()) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
-    root?.addEventListener('note-ask-ai', request); root?.addEventListener('note-learn-ask', learn);
-    return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener('note-learn-ask', learn); };
+    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnSelection>).detail; if (!detail?.sourceId || !cleanSelection(detail.selection || '') || (detail.kind === 'ask' && !detail.question?.trim())) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
+    root?.addEventListener('note-ask-ai', request); root?.addEventListener(LEARN_EVENT, learn);
+    return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener(LEARN_EVENT, learn); };
   }, [root, client, owner]);
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -62,11 +65,15 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const anchor = picked.anchor && isLearnNote(picked.anchor) ? picked.anchor.id : undefined;
     return { request: { question: texts.at(-1) || '', context: texts.slice(0, -1), images: picked.images, instruction: readAiInstruction() }, anchorId: picked.anchor?.id || null, parentId: anchor };
   }
-  /** A term or follow-up from the Learn panel carries its thread (and page) as context and lands under its parent. */
-  function learnRequest(ask: LearnAsk): Pending {
-    const term = ask.term?.trim(), context = threadContext(api.getSceneElements(), ask.parentId);
-    const question = term ? `Explain the term "${term}" as it is used in this thread.` : ask.question.trim();
-    return { request: { question, context, images: [], instruction: readAiInstruction(), mode: term ? 'term' : 'ask' }, anchorId: ask.parentId, parentId: ask.parentId, header: term ? { term } : { question } };
+  /**
+   * Explain/Ask on selected words: the note (and the thread it belongs to,
+   * back to a sent page) is the context, so the words are explained in the
+   * sense they have there.
+   */
+  function learnRequest(ask: LearnSelection): Pending {
+    const elements = api.getSceneElements(), sourceId = connectionTarget(elements, ask.sourceId)?.element.id || ask.sourceId;
+    const learn = { ...ask, sourceId, selection: cleanSelection(ask.selection), question: ask.question?.trim() };
+    return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction: readAiInstruction(), mode: ask.kind }, anchorId: sourceId, parentId: sourceId, learn };
   }
   async function start() {
     if (busy.current) return;
@@ -92,18 +99,21 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     pending.current = next; busy.current = true; setDialog(null); setAsking(true); setPreview('');
     const controller = new AbortController(); abort.current = controller;
     try {
+      if (next.learn && !next.learn.nodeId) next.learn.nodeId = addSelectionNode(next.learn) || undefined;
       const answer = await askGemini(key, next.request, { signal: controller.signal, onText: setPreview });
-      placeAnswer(answerMarkdown(answer, next.header), next, answer.model || 'gemini', answerTerms(answer.text));
+      if (next.learn) placeLearnAnswer(answerMarkdown(answer), next, answer.model || 'gemini'); else placeAnswer(answerMarkdown(answer), next, answer.model || 'gemini');
       pending.current = null;
-      if (!answer.searched && next.request.mode !== 'term') onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
+      if (!answer.searched && next.request.mode !== 'explain') onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
     } catch (error) {
+      // No half-made branches: a failed or cancelled Explain/Ask removes the chip it added.
+      if (next.learn?.added?.length) { removeElements(next.learn.added); next.learn.nodeId = undefined; next.learn.added = undefined; }
       if ((error as Error)?.name === 'AbortError') return;
       const message = error instanceof Error ? error.message : 'Gemini could not answer.';
       if (error instanceof GeminiError && error.kind === 'key') apiKey.current = null;
       setDialog({ mode: 'error', message, key: error instanceof GeminiError && error.kind === 'key', detail: error instanceof GeminiError ? error.detail : '' });
     } finally { if (abort.current === controller) { abort.current = null; busy.current = false; } setAsking(false); setPreview(''); }
   }
-  function placeAnswer(markdown: string, next: Pending, model: string, terms: string[]) {
+  function placeAnswer(markdown: string, next: Pending, model: string) {
     const state = api.getAppState(), elements = api.getSceneElements();
     const anchor = next.anchorId ? elements.find(element => element.id === next.anchorId) : undefined;
     const fontSize = anchor?.type === 'text' ? anchor.fontSize : state.currentItemFontSize || 20;
@@ -112,10 +122,56 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const doc = clipboardRichDoc(markdown, false), wrap = Math.round(fontSize * 24);
     const color = anchor?.type === 'text' ? readRichText(anchor)?.color || anchor.strokeColor : state.currentItemStrokeColor;
     const [created] = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: place.x, y: place.y, fontSize, fontFamily: anchor?.type === 'text' ? anchor.fontFamily : state.currentItemFontFamily }]);
-    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: learnData(next, model, terms) } } as ExcalidrawTextElement;
+    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: learnData(next, model) } } as ExcalidrawTextElement;
     applyRichText(text, doc, color, true, { wrap, width: wrap, fontSize });
     api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     requestAnimationFrame(() => api.scrollToContent(text, { fitToContent: false, animate: true }));
+  }
+  /** The chip holding the selected words (and the question), to the right of its note, joined by a line. */
+  function addSelectionNode(learn: Pending['learn'] & {}): string | null {
+    const elements = api.getSceneElements(), source = connectionTarget(elements, learn.sourceId), state = api.getAppState();
+    if (!source) return null;
+    const label = (source.element.type === 'text' ? source.element : elements.find(item => item.type === 'text' && item.containerId === source.element.id)) as ExcalidrawTextElement | undefined;
+    const base = learnBase({ fontSize: label?.fontSize, customData: source.element.customData }), k = base / 20;
+    const text = selectionNodeText(learn.selection, learn.kind === 'ask' ? learn.question : undefined);
+    const size = selectionNodeSize(text, base), place = placeRightOf(source.geometry, size, elements, LEARN_NODE.gapSource * k, LEARN_NODE.gapStack * k);
+    const created = convertToExcalidrawElements([{ type: 'rectangle', ...place, ...size, strokeColor: LEARN_NODE.stroke, backgroundColor: LEARN_NODE.fill, fillStyle: 'solid', strokeWidth: LEARN_NODE.chipStrokeWidth,
+      roughness: 0, roundness: LEARN_NODE.roundness, customData: { noteAi: { question: text.slice(0, 500), at: new Date().toISOString(), parentId: source.element.id, role: 'selection', kind: learn.kind, selection: learn.selection, base } satisfies LearnData },
+      label: { text, fontSize: base, fontFamily: label?.fontFamily || state.currentItemFontFamily, strokeColor: LEARN_NODE.text, textAlign: 'left', verticalAlign: 'middle' } }]);
+    const node = created.find(element => element.type === 'rectangle')!;
+    learn.added = [...created, ...link(source.element.id, node.id, created, LEARN_SOURCE_LINE)].map(element => element.id);
+    requestAnimationFrame(() => api.scrollToContent(node, { fitToContent: false, animate: true }));
+    return node.id;
+  }
+  /** The answer, to the right of its chip (or of the note, if the chip was deleted), joined by a line with an arrowhead. */
+  function placeLearnAnswer(markdown: string, next: Pending, model: string) {
+    const state = api.getAppState(), elements = api.getSceneElements(), learn = next.learn!;
+    const from = connectionTarget(elements, learn.nodeId || '') || connectionTarget(elements, learn.sourceId);
+    const source = connectionTarget(elements, learn.sourceId)?.element;
+    const label = (source && (source.type === 'text' ? source : elements.find(item => item.type === 'text' && item.containerId === source.id))) as ExcalidrawTextElement | undefined;
+    const base = learnBase({ fontSize: label?.fontSize, customData: from?.element.customData }), k = base / 20, fontSize = Math.round(base * LEARN_NODE.answerFontFactor);
+    const doc = clipboardRichDoc(markdown, false), wrap = Math.round(fontSize * LEARN_NODE.answerChars);
+    const [created] = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: 0, y: 0, fontSize, fontFamily: label?.fontFamily || state.currentItemFontFamily }]);
+    const text = { ...created, width: wrap, customData: { noteAi: { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(), role: 'answer', kind: learn.kind, base, ...(from ? { parentId: from.element.id } : {}) } satisfies LearnData } } as ExcalidrawTextElement;
+    applyRichText(text, doc, label?.strokeColor || state.currentItemStrokeColor, true, { wrap, width: wrap, fontSize });
+    const place = from ? placeRightOf(from.geometry, { width: text.width, height: text.height }, elements, LEARN_NODE.gapAnswer * k, LEARN_NODE.gapStack * k) : { x: state.width / 2 / state.zoom.value - state.scrollX - 200, y: state.height / 2 / state.zoom.value - state.scrollY - 40 };
+    mutateElement(text, place, false);
+    if (from) link(from.element.id, text.id, [text], LEARN_EDGE); else api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    api.updateScene({ appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
+    requestAnimationFrame(() => api.scrollToContent(text, { fitToContent: false, animate: true }));
+  }
+  /** Add new elements with a line from `fromId` to `toId` that follows both when they move; returns the line. */
+  function link(fromId: string, toId: string, added: readonly ExcalidrawElement[], settings: typeof LEARN_EDGE): ExcalidrawElement[] {
+    const all = [...api.getSceneElements(), ...added];
+    let edges: ExcalidrawElement[] = [];
+    try { edges = createObjectConnection(all, fromId, toId, settings, learnEdgeStyle()); attachDiagramEdge(all, edges); } catch { /* the nodes still land; only the line is missing */ }
+    api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...added, ...edges], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    return edges;
+  }
+  /** Remove elements this feature added (a branch whose answer never came). */
+  function removeElements(ids: readonly string[]) {
+    const gone = new Set(ids);
+    api.updateScene({ elements: api.getSceneElementsIncludingDeleted().map(element => gone.has(element.id) ? newElementWith(element, { isDeleted: true }) : element), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   }
   function askGoogle(question = pending.current?.request.question || '') {
     window.open(googleAiModeUrl(question || 'Ask anything'), '_blank', 'noopener');
@@ -134,7 +190,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
         {asking ? <Loader2 className="spinning" size={16} /> : <Sparkles size={16} />}<span>Ask AI</span></button>
       <button className="board-header-button board-header-chevron" aria-label="Ask AI settings" aria-haspopup="dialog" onClick={() => { pending.current = null; void currentSealed().catch(() => undefined); setDialog({ mode: 'manage' }); }}><ChevronDown size={14} /></button>
     </div>, host)}
-    {asking && <div className={`ask-ai-status${preview ? ' streaming' : ''}`} role="status"><span className="ask-ai-status-line"><Loader2 className="spinning" size={15} /> {preview ? 'Gemini is writing…' : 'Asking Gemini…'} <button type="button" aria-label="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></span>{preview && <p className="ask-ai-preview">{preview.replace(/\[\[|\]\]/g, '')}</p>}</div>}
+    {asking && <div className={`ask-ai-status${preview ? ' streaming' : ''}`}><span className="ask-ai-status-line"><Loader2 className="spinning" size={15} aria-hidden /> <span role="status">{preview ? 'Gemini is writing…' : 'Asking Gemini…'}</span> <button type="button" aria-label="Cancel" title="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></span>{preview && <p className="ask-ai-preview"><span>{previewText(preview)}</span></p>}</div>}
     {dialog && createPortal(<AskAiDialog dialog={dialog} sealed={sealed} signedIn={signedIn} pending={pending.current}
       onClose={() => setDialog(null)} onGoogle={askGoogle} onMode={mode => setDialog({ mode })}
       onAsk={question => { const next = selectionRequest(question); if (next.request.question.trim()) void proceed(next); }}
@@ -145,22 +201,22 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   </>;
 }
 
-function learnData(next: Pending, model: string, terms: string[]): LearnData {
-  return { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(),
-    ...(terms.length ? { terms } : {}), ...(next.parentId ? { parentId: next.parentId } : {}), ...(next.header?.term ? { term: next.header.term.slice(0, 60) } : {}) };
+/** The live preview is plain text: drop the term brackets and the bold and heading marks the note will draw. */
+const previewText = (text: string) => text.replace(/\[\[|\]\]/g, '').replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '');
+
+function learnData(next: Pending, model: string): LearnData {
+  return { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(), ...(next.parentId ? { parentId: next.parentId } : {}) };
 }
 
 /** The standing instruction, sent with every question; kept in this browser. */
 function InstructionField() {
-  const [text, setText] = useState(readAiInstruction), [saved, setSaved] = useState(true);
-  const change = (value: string) => { setText(value); setSaved(false); };
+  // Saved as you type, so closing the dialog can never lose it.
+  const [text, setText] = useState(readAiInstruction);
+  const change = (value: string) => { setText(value); saveAiInstruction(value); };
   return <div className="ask-ai-instruction">
-    <label>Default instruction<small>Sent with every question, so you never type it again. Saved in this browser.</small>
+    <label>Default instruction<small>Sent first with every question, Explain and Ask, and followed over the app's own defaults. Saved in this browser as you type.</small>
       <textarea rows={4} maxLength={2000} value={text} placeholder="For example: explain like Feynman, plain words, one everyday picture." onChange={event => change(event.target.value)} /></label>
-    <div className="dialog-actions">
-      {!text.trim() && <button type="button" className="secondary-button" onClick={() => change(FEYNMAN_INSTRUCTION)}>Use Feynman style</button>}
-      <button type="button" className="secondary-button" disabled={saved} onClick={() => { saveAiInstruction(text); setSaved(true); }}>{saved ? 'Saved' : 'Save instruction'}</button>
-    </div>
+    {!text.trim() && <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => change(FEYNMAN_INSTRUCTION)}>Use Feynman style</button></div>}
   </div>;
 }
 

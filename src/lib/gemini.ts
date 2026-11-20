@@ -4,8 +4,8 @@ export const GEMINI_MODEL = GEMINI_MODELS[0];
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export interface AskImage { mimeType: string; data: string }
-/** 'ask' is an ordinary question; 'term' explains a clicked term inside its thread, fast and without search. */
-export type AskMode = 'ask' | 'term';
+/** 'ask' is a question (maybe about selected words); 'explain' explains selected words in their note's sense, fast and without search. */
+export type AskMode = 'ask' | 'explain';
 export interface AskRequest { question: string; context: string[]; images: AskImage[]; instruction?: string; mode?: AskMode }
 export interface AskAnswer { text: string; sources: { title: string; url: string }[]; searched: boolean; model?: string }
 
@@ -14,17 +14,20 @@ export class GeminiError extends Error {
   constructor(message: string, readonly kind: 'key' | 'quota' | 'unavailable' | 'blocked' | 'network' | 'other', readonly detail = '', readonly quota: QuotaWindow = 'unknown', readonly retrySeconds = 0) { super(message); }
 }
 
-const SYSTEM = 'You answer questions written on a personal note board. Reply concisely in Markdown: a direct answer first, then short bullet points only if they help. No preamble. Use the attached notes and images as context when the question refers to "this" or "that".';
-
-/** Every answer marks its key terms so the Learn panel can turn them into clickable threads. */
-const TERMS = 'Mark 3 to 6 key terms a learner may not know by wrapping each in [[double brackets]] the first time it appears, for example [[photosynthesis]]. Bracket single words or short phrases only.';
-const TERM_MODE = 'The person clicked a term to learn it. Explain it as it is used in the topic given in the notes: what it means here, in plain words, in a few short lines. Then add one line that starts with "Origin:" and gives its real etymology. If you do not know a real etymology, write instead one line that starts with "Memory hook (made up):" and gives a short invented story that anchors the meaning; never present a made-up origin as real.';
+const BASE = 'You answer questions written on a personal note board, in Markdown. Use the attached notes and images as context when the question refers to "this" or "that".';
+/** Used only where the person's own instruction says nothing about length or format. */
+const DEFAULTS = "Defaults (the person's own instruction, if any, overrides them): a direct answer first, then short bullet points only if they help. No preamble.";
+const EXPLAIN = 'The person selected words in a note and asked you to explain them, in the sense they have in that note. After the explanation, add one line that starts with "Origin:" and gives the real etymology of the words. If you do not know a real etymology, write instead one line that starts with "Memory hook (made up):" with a short invented story that anchors the meaning; never present a made-up origin as real.';
 export const MAX_INSTRUCTION = 2000;
 
+/**
+ * The person's own instruction comes first and wins over the app's defaults
+ * (it used to come last and lose to "reply concisely", so it looked ignored).
+ */
 export function systemText(request: Pick<AskRequest, 'instruction' | 'mode'>) {
   const own = (request.instruction || '').trim().slice(0, MAX_INSTRUCTION);
-  return [SYSTEM, TERMS, request.mode === 'term' ? TERM_MODE : '', own ? `The person's standing instruction for every answer (follow it unless it conflicts with the rules above):\n${own}` : '']
-    .filter(Boolean).join('\n\n');
+  return [own ? `The person's own instruction. It applies to every answer and has priority over everything below; follow it exactly, including style, length and format:\n${own}` : '',
+    BASE, request.mode === 'explain' ? EXPLAIN : '', DEFAULTS].filter(Boolean).join('\n\n');
 }
 
 /**
@@ -52,7 +55,7 @@ export const forgetThinking = () => acceptedThinking.clear();
 
 export function geminiBody(request: AskRequest, search: boolean, model = '', step = 0) {
   const notes = request.context.filter(text => text.trim()).map(text => `Note on the board:\n${text.trim()}`);
-  const config = thinkingConfigs(model, request.mode === 'term')[step];
+  const config = thinkingConfigs(model, request.mode === 'explain')[step];
   return {
     systemInstruction: { parts: [{ text: systemText(request) }] },
     contents: [{ role: 'user', parts: [
@@ -186,7 +189,7 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
   };
   // A model that rejects a thinking setting is asked again with the next one; the accepted step is remembered.
   const call = async (model: string, search: boolean) => {
-    const fast = request.mode === 'term', key = `${model}|${fast}`, last = thinkingConfigs(model, fast).length - 1;
+    const fast = request.mode === 'explain', key = `${model}|${fast}`, last = thinkingConfigs(model, fast).length - 1;
     for (let step = acceptedThinking.get(key) || 0; ; step++) {
       try { const answer = await send(model, search, step); acceptedThinking.set(key, step); return answer; }
       catch (error) {
@@ -197,7 +200,7 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
   };
   const failures: GeminiError[] = [];
   for (const model of options.models || GEMINI_MODELS) {
-    for (const search of request.mode === 'term' ? [false] : [true, false]) {
+    for (const search of request.mode === 'explain' ? [false] : [true, false]) {
       try { return await call(model, search); }
       catch (error) {
         if (!(error instanceof GeminiError) || !['quota', 'unavailable', 'other'].includes(error.kind)) throw error;
