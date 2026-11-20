@@ -73,7 +73,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   function learnRequest(ask: LearnSelection): Pending {
     const elements = api.getSceneElements(), sourceId = connectionTarget(elements, ask.sourceId)?.element.id || ask.sourceId;
     const learn = { ...ask, sourceId, selection: cleanSelection(ask.selection), question: ask.question?.trim() };
-    return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction: readAiInstruction(), mode: ask.kind }, anchorId: sourceId, parentId: sourceId, learn };
+    return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction: readAiInstruction(), mode: ask.kind, focus: learn.selection }, anchorId: sourceId, parentId: sourceId, learn };
   }
   async function start() {
     if (busy.current) return;

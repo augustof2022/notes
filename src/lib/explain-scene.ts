@@ -22,7 +22,8 @@ export function selectionNodeText(selection: string, question?: string) {
 
 /** The prompt sent to Gemini for each kind. */
 export function learnQuestion({ kind, selection, question }: Pick<LearnSelection, 'kind' | 'selection' | 'question'>) {
-  return kind === 'explain' ? `Explain “${selection}”.` : `About “${selection}”: ${(question || '').trim()}`;
+  return kind === 'explain' ? `Explain “${selection}”, in the sense it has in my note.`
+    : `My question: ${(question || '').trim()}\n\n(It is about these words I selected in my note: “${selection}”.)`;
 }
 
 /**
