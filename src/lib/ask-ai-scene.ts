@@ -39,7 +39,8 @@ export function answerMarkdown(answer: AskAnswer) {
  * came from (answer → selection node → source), so later questions carry the
  * thread as context; `role` tells the selection node from the answer.
  */
-export interface LearnData { provider?: string; model?: string; question: string; at: string; parentId?: string; role?: 'selection' | 'answer'; kind?: 'explain' | 'ask'; selection?: string; base?: number }/** A page sent from the browser by the Note Learn helper. */
+export interface LearnData { provider?: string; model?: string; question: string; at: string; parentId?: string; role?: 'selection' | 'answer'; kind?: 'explain' | 'ask'; selection?: string; base?: number }
+/** A page sent from the browser by the Note Learn helper. */
 export interface LearnPage { title: string; url: string; text: string; selection?: string; at: string }
 
 /** Check a page sent by the browser helper and trim it before it goes on the board (only http/https pages). */

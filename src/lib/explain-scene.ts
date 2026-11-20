@@ -71,7 +71,9 @@ const overlaps = (a: { x: number; y: number; width: number; height: number }, b:
  */
 export function placeRightOf(from: Pick<Box, 'x' | 'y' | 'width'>, size: { width: number; height: number }, elements: readonly Box[], gap = 56, spacing = 20) {
   const x = from.x + from.width + gap;
-  const others = elements.filter(element => !element.isDeleted && element.type !== 'arrow' && element.type !== 'line');
+  // Frames, shapes or pictures the note sits on, and labels inside shapes, are not obstacles.
+  const contains = (outer: Box) => outer.x <= from.x && outer.y <= from.y && outer.x + outer.width >= from.x + from.width;
+  const others = elements.filter(element => !element.isDeleted && !['arrow', 'line', 'frame', 'magicframe'].includes(element.type) && !(element as { containerId?: string | null }).containerId && !contains(element));
   let y = from.y;
   for (let guard = 0; guard < 400; guard++) {
     const hit = others.filter(element => overlaps({ x, y, ...size }, element, spacing));

@@ -44,3 +44,9 @@ it('places new nodes to the right, stacking below earlier ones instead of coveri
   const gone = { ...box('g', 256, 0, 120, 40), isDeleted: true } as ExcalidrawElement;
   expect(placeRightOf(source, { width: 120, height: 40 }, [source, line, gone])).toEqual({ x: 256, y: 0 });
 });
+
+it('does not treat a frame, a shape the note sits on, or labels inside shapes as obstacles', () => {
+  const source = box('src', 100, 100, 200, 60, 'text');
+  const frame = box('f', 0, 0, 2000, 1000, 'frame'), card = box('bg', 50, 50, 1500, 800), label = { ...box('lbl', 356, 100, 120, 40, 'text'), containerId: 'x' } as unknown as ExcalidrawElement;
+  expect(placeRightOf(source, { width: 120, height: 40 }, [frame, card, label, source])).toEqual({ x: 356, y: 100 });
+});
