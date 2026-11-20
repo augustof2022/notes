@@ -113,12 +113,16 @@ it('explains selected words without search, with the person’s instruction firs
   const body = JSON.parse((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
   expect(body.tools).toBeUndefined();
   const system: string = body.systemInstruction.parts[0].text;
-  expect(system.startsWith('The person\'s own instruction.')).toBe(true);
+  expect(system.startsWith('The person\'s own instruction for HOW to answer')).toBe(true);
   expect(system.indexOf('Answer in exactly 3 bullet points.')).toBeLessThan(system.indexOf('Defaults'));
-  expect(system).toContain('priority over everything below');
+  expect(system).toContain('never changes WHAT to answer');
   expect(system).toContain('Memory hook (made up):');
   expect(system).not.toContain('[[');
   expect(systemText({})).not.toContain('Memory hook');
+  const ask = systemText({ mode: 'ask', focus: 'PMT', instruction: 'Explain like Feynman.' });
+  expect(ask).toContain('Answer that question directly');
+  expect(ask).not.toContain('Memory hook');
+  expect(systemText({ mode: 'ask' })).not.toContain('Answer that question directly');
   expect(systemText({}).startsWith('You answer questions')).toBe(true);
   expect(systemText({ instruction: 'x'.repeat(3000) }).length).toBeLessThan(3000);
 });

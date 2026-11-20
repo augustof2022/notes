@@ -6,7 +6,8 @@ const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 export interface AskImage { mimeType: string; data: string }
 /** 'ask' is a question (maybe about selected words); 'explain' explains selected words in their note's sense, fast and without search. */
 export type AskMode = 'ask' | 'explain';
-export interface AskRequest { question: string; context: string[]; images: AskImage[]; instruction?: string; mode?: AskMode }
+/** `focus`: the words selected in a note when the question is about them. */
+export interface AskRequest { question: string; context: string[]; images: AskImage[]; instruction?: string; mode?: AskMode; focus?: string }
 export interface AskAnswer { text: string; sources: { title: string; url: string }[]; searched: boolean; model?: string }
 
 export type QuotaWindow = 'minute' | 'day' | 'none' | 'unknown';
@@ -18,16 +19,18 @@ const BASE = 'You answer questions written on a personal note board, in Markdown
 /** Used only where the person's own instruction says nothing about length or format. */
 const DEFAULTS = "Defaults (the person's own instruction, if any, overrides them): a direct answer first, then short bullet points only if they help. No preamble.";
 const EXPLAIN = 'The person selected words in a note and asked you to explain them, in the sense they have in that note. After the explanation, add one line that starts with "Origin:" and gives the real etymology of the words. If you do not know a real etymology, write instead one line that starts with "Memory hook (made up):" with a short invented story that anchors the meaning; never present a made-up origin as real.';
+/** Ask on selected words: the typed question is the task; the words are only what it is about. */
+const ASK_ABOUT = 'The person selected words in a note and typed their own question about them. Answer that question directly and specifically, starting with the answer. Do not just define or explain the selected words unless the question asks for that.';
 export const MAX_INSTRUCTION = 2000;
 
 /**
  * The person's own instruction comes first and wins over the app's defaults
  * (it used to come last and lose to "reply concisely", so it looked ignored).
  */
-export function systemText(request: Pick<AskRequest, 'instruction' | 'mode'>) {
+export function systemText(request: Pick<AskRequest, 'instruction' | 'mode' | 'focus'>) {
   const own = (request.instruction || '').trim().slice(0, MAX_INSTRUCTION);
-  return [own ? `The person's own instruction. It applies to every answer and has priority over everything below; follow it exactly, including style, length and format:\n${own}` : '',
-    BASE, request.mode === 'explain' ? EXPLAIN : '', DEFAULTS].filter(Boolean).join('\n\n');
+  return [own ? `The person's own instruction for HOW to answer (style, tone, length, format). Follow it over the defaults below. It never changes WHAT to answer: always answer the question actually asked.\n${own}` : '',
+    BASE, request.mode === 'explain' ? EXPLAIN : request.focus ? ASK_ABOUT : '', DEFAULTS].filter(Boolean).join('\n\n');
 }
 
 /**
