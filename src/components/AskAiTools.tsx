@@ -134,7 +134,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
         {asking ? <Loader2 className="spinning" size={16} /> : <Sparkles size={16} />}<span>Ask AI</span></button>
       <button className="board-header-button board-header-chevron" aria-label="Ask AI settings" aria-haspopup="dialog" onClick={() => { pending.current = null; void currentSealed().catch(() => undefined); setDialog({ mode: 'manage' }); }}><ChevronDown size={14} /></button>
     </div>, host)}
-    {asking && <div className={`ask-ai-status${preview ? ' streaming' : ''}`} role="status"><span className="ask-ai-status-line"><Loader2 className="spinning" size={15} /> {preview ? 'Gemini is writing…' : 'Asking Gemini…'} <button type="button" aria-label="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></span>{preview && <p className="ask-ai-preview">{preview.replace(/\[\[|\]\]/g, '')}</p>}</div>}
+    {asking && <div className={`ask-ai-status${preview ? ' streaming' : ''}`}><span className="ask-ai-status-line"><Loader2 className="spinning" size={15} aria-hidden /> <span role="status">{preview ? 'Gemini is writing…' : 'Asking Gemini…'}</span> <button type="button" aria-label="Cancel" title="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></span>{preview && <p className="ask-ai-preview"><span>{previewText(preview)}</span></p>}</div>}
     {dialog && createPortal(<AskAiDialog dialog={dialog} sealed={sealed} signedIn={signedIn} pending={pending.current}
       onClose={() => setDialog(null)} onGoogle={askGoogle} onMode={mode => setDialog({ mode })}
       onAsk={question => { const next = selectionRequest(question); if (next.request.question.trim()) void proceed(next); }}
@@ -144,6 +144,9 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
       onRemove={async () => { apiKey.current = null; await forgetAiKeyLock(owner); await deleteSealedAiKey(client!, owner); setSealed(null); setDialog(null); onMessage('Your Gemini key was removed from your account.'); }} />, document.body)}
   </>;
 }
+
+/** The live preview is plain text: drop the term brackets and the bold and heading marks the note will draw. */
+const previewText = (text: string) => text.replace(/\[\[|\]\]/g, '').replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '');
 
 function learnData(next: Pending, model: string, terms: string[]): LearnData {
   return { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(),
