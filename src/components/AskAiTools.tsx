@@ -8,14 +8,17 @@ import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucid
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
 import { askGemini, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
-import { answerMarkdown, askSelection } from '../lib/ask-ai-scene';
+import { answerMarkdown, answerTerms, askSelection, isLearnNote, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { FEYNMAN_INSTRUCTION, readAiInstruction, saveAiInstruction } from '../lib/ai-instruction';
 import { jotPlacement } from '../lib/jot-layout';
 import { applyRichText } from '../lib/rich-text-scene';
 import { clipboardRichDoc, readRichText, richDocText } from '../lib/rich-text';
 import './ask-ai.css';
 
 type Dialog = { mode: 'setup' | 'unlock' | 'manage' | 'ask'; message?: string } | { mode: 'error'; message: string; key?: boolean; detail?: string } | null;
-interface Pending { request: AskRequest; anchorId: string | null }
+interface Pending { request: AskRequest; anchorId: string | null; parentId?: string; header?: { term?: string; question?: string } }
+/** Sent by the Learn panel: explain a clicked term, or ask a follow-up, inside a note's thread. */
+export interface LearnAsk { parentId: string; question: string; term?: string }
 
 /**
  * Ask AI writes Gemini's answer onto the board as a new note. Each account
@@ -24,15 +27,16 @@ interface Pending { request: AskRequest; anchorId: string | null }
  * Ask Google (AI Mode in a new tab) needs no key at all.
  */
 export function AskAiTools({ api, root, client, owner, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null; client: SupabaseClient | null; owner: string; onMessage: (message: string) => void }) {
-  const [host, setHost] = useState<Element | null>(null), [dialog, setDialog] = useState<Dialog>(null), [asking, setAsking] = useState(false);
+  const [host, setHost] = useState<Element | null>(null), [dialog, setDialog] = useState<Dialog>(null), [asking, setAsking] = useState(false), [preview, setPreview] = useState('');
   const [sealed, setSealed] = useState<SealedAiKey | null | undefined>(undefined);
-  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null);
+  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null), busy = useRef(false);
   const signedIn = !!client && owner !== 'local';
   useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
-    root?.addEventListener('note-ask-ai', request);
-    return () => root?.removeEventListener('note-ask-ai', request);
+    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnAsk>).detail; if (!detail?.parentId || !detail.question.trim()) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
+    root?.addEventListener('note-ask-ai', request); root?.addEventListener('note-learn-ask', learn);
+    return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener('note-learn-ask', learn); };
   }, [root, client, owner]);
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -55,15 +59,28 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const state = api.getAppState(), picked = askSelection(api.getSceneElements(), state.selectedElementIds, api.getFiles());
     const texts = question ? [...picked.texts, question] : picked.texts;
     if (picked.skippedImages) onMessage(`${picked.skippedImages} selected image${picked.skippedImages === 1 ? ' was' : 's were'} not sent (only PNG, JPEG, or WebP up to about 4 MB, three at most).`);
-    return { request: { question: texts.at(-1) || '', context: texts.slice(0, -1), images: picked.images }, anchorId: picked.anchor?.id || null };
+    const anchor = picked.anchor && isLearnNote(picked.anchor) ? picked.anchor.id : undefined;
+    return { request: { question: texts.at(-1) || '', context: texts.slice(0, -1), images: picked.images, instruction: readAiInstruction() }, anchorId: picked.anchor?.id || null, parentId: anchor };
+  }
+  /** A term or follow-up from the Learn panel carries its thread (and page) as context and lands under its parent. */
+  function learnRequest(ask: LearnAsk): Pending {
+    const term = ask.term?.trim(), context = threadContext(api.getSceneElements(), ask.parentId);
+    const question = term ? `Explain the term "${term}" as it is used in this thread.` : ask.question.trim();
+    return { request: { question, context, images: [], instruction: readAiInstruction(), mode: term ? 'term' : 'ask' }, anchorId: ask.parentId, parentId: ask.parentId, header: term ? { term } : { question } };
   }
   async function start() {
-    if (asking) return;
+    if (busy.current) return;
     const next = selectionRequest();
     if (!next.request.question.trim()) { pending.current = next; setDialog({ mode: 'ask' }); return; }
     await proceed(next);
   }
+  /** One question at a time: busy covers loading the key as well as the answer. */
   async function proceed(next: Pending) {
+    if (busy.current) return;
+    busy.current = true;
+    try { await prepare(next); } finally { if (!abort.current) busy.current = false; }
+  }
+  async function prepare(next: Pending) {
     pending.current = next;
     if (!signedIn) { setDialog({ mode: 'error', message: 'Ask AI needs a signed-in Google account so your encrypted key can be saved. You can still use Ask Google.' }); return; }
     let key: Awaited<ReturnType<typeof readyKey>>;
@@ -72,21 +89,21 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     await run(key, next);
   }
   async function run(key: string, next: Pending) {
-    pending.current = next; setDialog(null); setAsking(true);
+    pending.current = next; busy.current = true; setDialog(null); setAsking(true); setPreview('');
     const controller = new AbortController(); abort.current = controller;
     try {
-      const answer = await askGemini(key, next.request, { signal: controller.signal });
-      placeAnswer(answerMarkdown(answer), next, answer.model || 'gemini');
+      const answer = await askGemini(key, next.request, { signal: controller.signal, onText: setPreview });
+      placeAnswer(answerMarkdown(answer, next.header), next, answer.model || 'gemini', answerTerms(answer.text));
       pending.current = null;
-      if (!answer.searched) onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
+      if (!answer.searched && next.request.mode !== 'term') onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') return;
       const message = error instanceof Error ? error.message : 'Gemini could not answer.';
       if (error instanceof GeminiError && error.kind === 'key') apiKey.current = null;
       setDialog({ mode: 'error', message, key: error instanceof GeminiError && error.kind === 'key', detail: error instanceof GeminiError ? error.detail : '' });
-    } finally { if (abort.current === controller) abort.current = null; setAsking(false); }
+    } finally { if (abort.current === controller) { abort.current = null; busy.current = false; } setAsking(false); setPreview(''); }
   }
-  function placeAnswer(markdown: string, next: Pending, model: string) {
+  function placeAnswer(markdown: string, next: Pending, model: string, terms: string[]) {
     const state = api.getAppState(), elements = api.getSceneElements();
     const anchor = next.anchorId ? elements.find(element => element.id === next.anchorId) : undefined;
     const fontSize = anchor?.type === 'text' ? anchor.fontSize : state.currentItemFontSize || 20;
@@ -95,7 +112,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const doc = clipboardRichDoc(markdown, false), wrap = Math.round(fontSize * 24);
     const color = anchor?.type === 'text' ? readRichText(anchor)?.color || anchor.strokeColor : state.currentItemStrokeColor;
     const [created] = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: place.x, y: place.y, fontSize, fontFamily: anchor?.type === 'text' ? anchor.fontFamily : state.currentItemFontFamily }]);
-    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString() } } } as ExcalidrawTextElement;
+    const text = { ...created, width: wrap, customData: { noteJot: place.jot, noteAi: learnData(next, model, terms) } } as ExcalidrawTextElement;
     applyRichText(text, doc, color, true, { wrap, width: wrap, fontSize });
     api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     requestAnimationFrame(() => api.scrollToContent(text, { fitToContent: false, animate: true }));
@@ -117,7 +134,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
         {asking ? <Loader2 className="spinning" size={16} /> : <Sparkles size={16} />}<span>Ask AI</span></button>
       <button className="board-header-button board-header-chevron" aria-label="Ask AI settings" aria-haspopup="dialog" onClick={() => { pending.current = null; void currentSealed().catch(() => undefined); setDialog({ mode: 'manage' }); }}><ChevronDown size={14} /></button>
     </div>, host)}
-    {asking && <div className="ask-ai-status" role="status"><Loader2 className="spinning" size={15} /> Asking Gemini… <button type="button" aria-label="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></div>}
+    {asking && <div className={`ask-ai-status${preview ? ' streaming' : ''}`} role="status"><span className="ask-ai-status-line"><Loader2 className="spinning" size={15} /> {preview ? 'Gemini is writing…' : 'Asking Gemini…'} <button type="button" aria-label="Cancel" onClick={() => abort.current?.abort()}><X size={14} /></button></span>{preview && <p className="ask-ai-preview">{preview.replace(/\[\[|\]\]/g, '')}</p>}</div>}
     {dialog && createPortal(<AskAiDialog dialog={dialog} sealed={sealed} signedIn={signedIn} pending={pending.current}
       onClose={() => setDialog(null)} onGoogle={askGoogle} onMode={mode => setDialog({ mode })}
       onAsk={question => { const next = selectionRequest(question); if (next.request.question.trim()) void proceed(next); }}
@@ -126,6 +143,25 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
       onForget={async () => { apiKey.current = null; await forgetAiKeyLock(owner); setDialog(null); onMessage('Ask AI is locked on this device. Your encrypted key stays in your account.'); }}
       onRemove={async () => { apiKey.current = null; await forgetAiKeyLock(owner); await deleteSealedAiKey(client!, owner); setSealed(null); setDialog(null); onMessage('Your Gemini key was removed from your account.'); }} />, document.body)}
   </>;
+}
+
+function learnData(next: Pending, model: string, terms: string[]): LearnData {
+  return { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(),
+    ...(terms.length ? { terms } : {}), ...(next.parentId ? { parentId: next.parentId } : {}), ...(next.header?.term ? { term: next.header.term.slice(0, 60) } : {}) };
+}
+
+/** The standing instruction, sent with every question; kept in this browser. */
+function InstructionField() {
+  const [text, setText] = useState(readAiInstruction), [saved, setSaved] = useState(true);
+  const change = (value: string) => { setText(value); setSaved(false); };
+  return <div className="ask-ai-instruction">
+    <label>Default instruction<small>Sent with every question, so you never type it again. Saved in this browser.</small>
+      <textarea rows={4} maxLength={2000} value={text} placeholder="For example: explain like Feynman, plain words, one everyday picture." onChange={event => change(event.target.value)} /></label>
+    <div className="dialog-actions">
+      {!text.trim() && <button type="button" className="secondary-button" onClick={() => change(FEYNMAN_INSTRUCTION)}>Use Feynman style</button>}
+      <button type="button" className="secondary-button" disabled={saved} onClick={() => { saveAiInstruction(text); setSaved(true); }}>{saved ? 'Saved' : 'Save instruction'}</button>
+    </div>
+  </div>;
 }
 
 function AskAiDialog({ dialog, sealed, signedIn, pending, onClose, onGoogle, onMode, onAsk, onSetup, onUnlock, onForget, onRemove }: {
@@ -170,6 +206,7 @@ function AskAiDialog({ dialog, sealed, signedIn, pending, onClose, onGoogle, onM
     <div className="settings-account"><span><KeyRound size={18} /><strong>{!signedIn ? 'Sign in with Google to save a key' : sealed === undefined ? 'Checking your key…' : sealed ? 'Encrypted key saved in your account' : 'No key saved yet'}</strong></span>
       {signedIn && <button type="button" className="secondary-button" onClick={() => onMode('setup')}>{sealed ? 'Replace key' : 'Add key'}</button>}</div>
     <p className="small-note">Your key is encrypted in this browser with your passphrase before it is saved. The database, the server, and the app owner only see scrambled text. Free-tier questions may be used by Google to improve its products, so avoid sending private information. Delete or replace a key anytime in <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>.</p>
+    <InstructionField />
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="dialog-actions">
       {sealed && <button type="button" className="secondary-button" disabled={busy} onClick={() => void act(onForget)}>Lock on this device</button>}

@@ -1,4 +1,10 @@
 .ask-ai-status{position:absolute;z-index:9;left:50%;bottom:96px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border:1px solid var(--accent);border-radius:999px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:12px}
+.ask-ai-status.streaming{flex-direction:column;align-items:stretch;width:min(520px,calc(100% - 32px));border-radius:14px;padding:10px 10px 12px 14px}
+.ask-ai-status-line{display:flex;align-items:center;gap:8px}.ask-ai-status-line button{margin-left:auto}
+.ask-ai-preview{margin:8px 0 0;max-height:min(36vh,280px);overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.55;color:var(--ink)}
+.ask-ai-instruction{margin:16px 0 4px;padding-top:14px;border-top:1px solid var(--line)}
+.ask-ai-instruction label small{display:block;font-weight:400;color:var(--muted);margin:2px 0 6px}
+.ask-ai-instruction .dialog-actions{margin-top:8px}
 .ask-ai-status button{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;color:var(--muted)}
 .ask-ai-status button:hover{background:var(--accent-light);color:var(--accent)}
 .ask-ai-steps{margin:0 0 18px;padding-left:20px;font-size:12px;line-height:1.8;color:var(--ink)}
