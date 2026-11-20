@@ -19,7 +19,7 @@ const received = new Set<string>();
  * pages sent by the Note Learn browser helper.
  */
 export function LearnPanel({ api, root, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null; onMessage: (message: string) => void }) {
-  const [view, setView] = useState<View | null>(null), [question, setQuestion] = useState(''), [hidden, setHidden] = useState(false);
+  const [view, setView] = useState<View | null>(null), [question, setQuestion] = useState(''), [hidden, setHidden] = useState(false), [openTrail, setOpenTrail] = useState('');
 
   useEffect(() => {
     let frame = 0, last = '';
@@ -66,16 +66,22 @@ export function LearnPanel({ api, root, onMessage }: { api: ExcalidrawImperative
   };
   const send = () => { const text = question.trim(); if (!text) return; ask({ parentId: view.id, question: text }); setQuestion(''); };
 
+  // A long trail shows its start, the parent and this note; the middle opens on demand.
+  const folded = path.length > 4 && openTrail !== view.id, shown = folded ? [path[0], null, ...path.slice(-2)] : path;
   if (hidden) return <button type="button" className="learn-panel-tab" onClick={() => setHidden(false)} aria-label="Show Learn panel"><BookOpen size={15} /> Learn</button>;
   return <aside className="learn-panel" aria-label="Learn panel">
-    <header><BookOpen size={16} /><h2>Learn</h2><button type="button" aria-label="Minimize Learn panel" title="Minimize" onClick={() => setHidden(true)}><Minus size={16} /></button></header>
-    {path.length > 1 && <nav className="learn-trail" aria-label="Thread trail">
-      {path.map((item, index) => <span key={item.id}>{index > 0 && <ChevronRight size={12} aria-hidden />}
-        {item.id === view.id ? <strong>{threadLabel(item)}</strong> : <button type="button" onClick={() => goTo(item)} title="Go back to this note">{threadLabel(item)}</button>}</span>)}
-    </nav>}
-    {page && <p className="learn-page"><Globe size={14} /> <a href={page.url} target="_blank" rel="noreferrer">{page.title}</a></p>}
-    {!!terms.length && <div className="learn-terms"><p>Tap a term to open its own thread:</p>
-      <div>{terms.map(term => <button type="button" key={term} onClick={() => ask({ parentId: view.id, question: term, term })}>{term}</button>)}</div></div>}
+    <header><BookOpen size={16} aria-hidden /><h2>Learn</h2><button type="button" aria-label="Minimize Learn panel" title="Minimize" onClick={() => setHidden(true)}><Minus size={16} /></button></header>
+    {(path.length > 1 || page || !!terms.length) && <div className="learn-body">
+      {path.length > 1 && <nav className="learn-trail" aria-label="Thread trail" ref={node => { if (node) node.scrollLeft = node.scrollWidth; }}>
+        {shown.map((item, index) => <span key={item?.id || 'more'}>{index > 0 && <ChevronRight size={12} aria-hidden />}
+          {!item ? <button type="button" className="learn-trail-more" onClick={() => setOpenTrail(view.id)} aria-label={`Show ${path.length - 3} hidden steps of the trail`} title="Show the whole trail">…</button>
+            : item.id === view.id ? <strong aria-current="true">{threadLabel(item)}</strong>
+            : <button type="button" onClick={() => goTo(item)} title={`Go back to: ${threadLabel(item)}`}>{threadLabel(item)}</button>}</span>)}
+      </nav>}
+      {page && <p className="learn-page"><Globe size={14} aria-hidden /><a href={page.url} target="_blank" rel="noreferrer" title={page.title}>{page.title}</a></p>}
+      {!!terms.length && <div className="learn-terms"><p>Explain a term in its own thread:</p>
+        <div>{terms.map(term => <button type="button" key={term} onClick={() => ask({ parentId: view.id, question: term, term })}>{term}</button>)}</div></div>}
+    </div>}
     <form className="learn-ask" onSubmit={event => { event.preventDefault(); send(); }}>
       <label htmlFor="learn-question">{page ? 'Ask about this page' : 'Follow-up in this thread'}</label>
       <div><textarea id="learn-question" rows={2} value={question} placeholder={page ? 'What is this page saying about…?' : 'Why…? What about…?'}
@@ -85,12 +91,23 @@ export function LearnPanel({ api, root, onMessage }: { api: ExcalidrawImperative
   </aside>;
 }
 
+/** Break a long card line at spaces so it stays about as wide as an AI answer (the page card is plain text, not wrapped by the board). */
+function wrapWords(text: string, width = 48) {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  return [...lines, line].join('\n');
+}
+
 /** Put a sent page on the board as a card in the middle of the view, selected so the panel opens on it. */
 function placePage(api: ExcalidrawImperativeAPI, page: LearnPage) {
   const state = api.getAppState(), fontSize = state.currentItemFontSize || 20;
   const url = page.url.length > 70 ? `${page.url.slice(0, 67)}…` : page.url;
-  const quote = page.selection ? `\n“${page.selection.replace(/\s+/g, ' ').slice(0, 160)}${page.selection.length > 160 ? '…' : ''}”` : '';
-  const [card] = convertToExcalidrawElements([{ type: 'text', text: `📄 ${page.title}\n${url}${quote}`, fontSize, fontFamily: state.currentItemFontFamily,
+  const cut = page.title.slice(0, 100), title = page.title.length > 100 ? `${cut.slice(0, cut.lastIndexOf(' ') > 60 ? cut.lastIndexOf(' ') : 99).trimEnd()}…` : page.title;
+  const quote = page.selection ? `\n${wrapWords(`“${page.selection.replace(/\s+/g, ' ').slice(0, 160)}${page.selection.length > 160 ? '…' : ''}”`)}` : '';
+  const [card] = convertToExcalidrawElements([{ type: 'text', text: `📄 ${wrapWords(title)}\n${url}${quote}`, fontSize, fontFamily: state.currentItemFontFamily,
     x: state.width / 2 / state.zoom.value - state.scrollX - 200, y: state.height / 2 / state.zoom.value - state.scrollY - 40 }]);
   const element = { ...card, customData: { noteLearnPage: page } } as ExcalidrawElement;
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), element], appState: { selectedElementIds: { [element.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
