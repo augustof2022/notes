@@ -3,7 +3,9 @@ import { createPortal, flushSync } from 'react-dom';
 import { CaptureUpdateAction, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { Arrowhead, ExcalidrawArrowElement, ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import { GitBranch, Link2, Plus, Shapes, SlidersHorizontal, Type } from 'lucide-react';
+import { ArrowUp, GitBranch, Link2, MessageCircleQuestion, Plus, Shapes, SlidersHorizontal, Sparkles, Type, X } from 'lucide-react';
+import { LEARN_EVENT } from '../lib/explain-scene';
+import { noteText } from '../lib/ask-ai-scene';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
 import { attachDiagramEdge, createDiagramEdge, createObjectConnection, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
 import { connectionPrimary, connectionTarget, connectionTargetAt, selectedConnectionTargets } from '../lib/connection-targets';
@@ -76,6 +78,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const [pointer, setPointer] = useState<[number, number] | null>(null);
   const [host, setHost] = useState<Element | null>(null);
   const [mobileActionSlot, setMobileActionSlot] = useState<HTMLDivElement | null>(null);
+  /** Ask on a whole object: which object the prompt box is open for, and what is typed. */
+  const [askFor, setAskFor] = useState<string | null>(null), [prompt, setPrompt] = useState('');
   const activeDiagram = useRef<string | null>(existing?.diagramId || null);
   const [snapshot, setSnapshot] = useState<{ elements: readonly ExcalidrawElement[]; state: AppState; key: string }>(() => ({ elements: api.getSceneElements(), state: api.getAppState(), key: '' }));
   const selection = selectedDiagram(snapshot.elements, snapshot.state);
@@ -394,7 +398,7 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const chosenGeometry = selection.object?.geometry || chosen;
   const nodeCenter = chosenGeometry && project([chosenGeometry.x + chosenGeometry.width / 2, chosenGeometry.y]);
   const editorTop = (root?.querySelector('.excalidraw')?.getBoundingClientRect().top || bounds?.top || 0) - (bounds?.top || 0);
-  const actionHeight = selection.node ? 102 : 52;
+  const actionHeight = selection.node && enabled ? 152 : 52;
   const properties = root?.querySelector('.excalidraw:not(.excalidraw--mobile) .selected-shape-actions .Island')?.getBoundingClientRect();
   const maxActionLeft = Math.max(8, (bounds?.width || 400) - 320);
   const minActionLeft = Math.min(maxActionLeft, properties?.width ? properties.right - (bounds?.left || 0) + 8 : 8);
@@ -404,15 +408,50 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const selectedData = selection.node && readDiagramData(selection.node);
   const selectedStyle = chosen ? styleOf(chosen) : baseStyle;
   const selectedConnection = selection.edge ? settingsOf(selection.edge) : connection;
-  const showActions = (enabled || selection.object || selection.edge?.customData?.noteDiagram?.universal) && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
-  const actions = selection.node ? <><button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
-    : selection.object ? <button onClick={beginConnection}><Link2 size={14} />Add connection</button>
+  const nodeTools = !!selection.node && enabled;
+  const aiTarget = selection.node || selection.object?.element || null;
+  const showActions = (enabled || selection.object || selection.node || selection.edge?.customData?.noteDiagram?.universal) && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
+  const learnObject = (kind: 'explain' | 'ask', question?: string) => {
+    if (!aiTarget) return false;
+    const detail = { kind, sourceId: aiTarget.id, selection: '', question, object: true, accepted: false };
+    root?.dispatchEvent(new CustomEvent(LEARN_EVENT, { detail }));
+    return detail.accepted;
+  };
+  const closeAsk = () => { setAskFor(null); setPrompt(''); root?.querySelector<HTMLElement>('.excalidraw')?.focus(); };
+  // The box stays open with the prompt if Ask AI is still busy with another answer.
+  const sendAsk = () => { const text = prompt.trim(); if (!text || !learnObject('ask', text)) return; setAskFor(null); setPrompt(''); };
+  const aiButtons = <>
+    <button className="note-text-ai is-primary" aria-label="Explain the selected object" title="Explain this object in a new connected note" onClick={() => learnObject('explain')}><Sparkles size={14} />Explain</button>
+    <button className="note-text-ai" aria-label="Ask about the selected object" title="Ask your own question about this object" onClick={() => { setPrompt(''); setAskFor(aiTarget?.id || null); }}><MessageCircleQuestion size={14} />Ask</button>
+  </>;
+  const divider = <span className="note-text-ai-divider" aria-hidden />;
+  const connect = <button className={mobileActionSlot ? 'diagram-span' : undefined} onClick={beginConnection}><Link2 size={14} />Add connection</button>;
+  // Desktop: Add connection | Explain Ask. Phone and the node grid: Explain Ask first, then the rest (as in the text bar).
+  const actions = nodeTools ? <>{aiButtons}{divider}<button onClick={() => chooseRelated('sibling')}><Plus size={14} />Add sibling</button><button onClick={() => chooseRelated('child')}><GitBranch size={14} />Add child</button><button onClick={beginConnection}><Link2 size={14} />Add connection</button><button onClick={openPanel}><Shapes size={14} />Edit shape</button></>
+    : aiTarget ? (mobileActionSlot ? <>{aiButtons}{divider}{connect}</> : <>{connect}{divider}{aiButtons}</>)
     : <><button onClick={editBends}><GitBranch size={14} />Edit bends</button><button onClick={() => editLabel(selection.edge!)}><Type size={14} />Label</button><button onClick={openPanel}><SlidersHorizontal size={14} />Line options</button></>;
-  const actionLabel = selection.node ? 'Selected diagram shape actions' : selection.object ? 'Selected object connections' : 'Selected diagram connection actions';
+  const actionLabel = nodeTools ? 'Selected diagram shape actions' : aiTarget ? 'Selected object actions' : 'Selected diagram connection actions';
+  // A different selection closes the prompt box, so it never asks about the wrong object.
+  useEffect(() => { if (askFor && aiTarget?.id !== askFor) { setAskFor(null); setPrompt(''); } }, [aiTarget?.id]);
+  const askTarget = askFor && aiTarget?.id === askFor ? aiTarget : null;
+  const askWords = askTarget ? noteText(askTarget, snapshot.elements) : '';
+  const askAbout = askWords ? `“${askWords.length > 60 ? `${askWords.slice(0, 59)}…` : askWords}”` : askTarget?.type === 'image' ? 'this image' : 'this drawing';
+  const askWidth = Math.min(380, (bounds?.width || 400) - 16), askHeight = 128;
+  const objectBottom = chosenGeometry && project([chosenGeometry.x, chosenGeometry.y + chosenGeometry.height])[1];
+  const askAbove = nodeCenter ? nodeCenter[1] - askHeight - 8 : 0, roomAbove = askAbove >= editorTop + 72;
+  const askPosition = nodeCenter && { width: askWidth, left: Math.max(8, Math.min((bounds?.width || 400) - askWidth - 8, nodeCenter[0] - askWidth / 2)),
+    top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - askHeight - 8, roomAbove ? askAbove : (objectBottom || 0) + 8)) };
+  const askForm = askTarget && <form className={`note-text-ask diagram-object-ask${mobileActionSlot ? ' is-inline' : ''}`} style={mobileActionSlot ? undefined : askPosition || undefined} onSubmit={event => { event.preventDefault(); sendAsk(); }}>
+    <span className="note-text-ask-about" title={askWords || askAbout}><MessageCircleQuestion size={14} /><span>Ask about <b>{askAbout}</b></span></span>
+    <div className="note-text-ask-row"><textarea aria-label="Your prompt" rows={1} maxLength={2000} value={prompt} autoFocus placeholder="Your prompt" onChange={event => { setPrompt(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(120, event.target.scrollHeight)}px`; }}
+      onKeyDown={event => { event.stopPropagation(); if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendAsk(); } if (event.key === 'Escape') { event.preventDefault(); closeAsk(); } }} />
+      <button className="note-text-ask-send" aria-label="Send prompt" type="submit" disabled={!prompt.trim()}><ArrowUp size={16} /></button><button aria-label="Cancel" type="button" onClick={closeAsk}><X size={16} /></button></div>
+    <small>Enter to send · Shift+Enter for a new line · Esc to cancel</small>
+  </form>;
   return <>
     {host && createPortal(<button className="diagram-mode-button" aria-label="Diagrams" aria-pressed={enabled} onClick={() => { manuallyExited.current = false; setEnabled(true); openPanel(); }} title="Diagram shape libraries, connections, and themes"><Shapes size={15} /><span>Diagrams</span></button>, host)}
-    {showActions && (mobileActionSlot ? createPortal(<div className="diagram-inline-actions" role="group" aria-label={actionLabel}>{actions}</div>, mobileActionSlot)
-      : actionPosition && snapshot.state.openMenu !== 'canvas' && <div className={`diagram-quick-actions ${selection.node ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={actionLabel}>{actions}</div>)}
+    {showActions && (mobileActionSlot ? createPortal(askForm || <div className="diagram-inline-actions" role="group" aria-label={actionLabel}>{actions}</div>, mobileActionSlot)
+      : actionPosition && snapshot.state.openMenu !== 'canvas' && (askForm || <div className={`diagram-quick-actions ${nodeTools ? 'diagram-node-quick-actions' : ''}`} style={actionPosition} role="group" aria-label={actionLabel}>{actions}</div>))}
     {(placing || sourceId) && <div className="diagram-operation" role="status" style={{ top: editorTop + 72 }}>
       <span>{placing ? 'Tap the board to place your shape, then type.' : 'Tap a board object to connect. Connections follow shapes, text, images, drawings, and groups.'}</span>
       {sourceId && <><label>From<select aria-label="Connection from side" value={connection.fromSide} onChange={event => setConnection(previous => ({ ...previous, fromSide: event.target.value as ConnectionSettings['fromSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label><label>To<select aria-label="Connection to side" value={connection.toSide} onChange={event => setConnection(previous => ({ ...previous, toSide: event.target.value as ConnectionSettings['toSide'] }))}>{['top', 'right', 'bottom', 'left'].map(side => <option key={side}>{side}</option>)}</select></label></>}

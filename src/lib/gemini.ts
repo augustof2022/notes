@@ -4,33 +4,54 @@ export const GEMINI_MODEL = GEMINI_MODELS[0];
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export interface AskImage { mimeType: string; data: string }
-/** 'ask' is a question (maybe about selected words); 'explain' explains selected words in their note's sense, fast and without search. */
+/**
+ * 'ask' (the default) is clean: only the context, what was selected, and the
+ * person's prompt as typed; no system instruction (Renz, 2026-11-20).
+ * 'explain' explains selected words or a picture, with the app's rules and
+ * the saved instruction, fast and without search.
+ */
 export type AskMode = 'ask' | 'explain';
-/** `focus`: the words selected in a note when the question is about them. */
-export interface AskRequest { question: string; context: string[]; images: AskImage[]; instruction?: string; mode?: AskMode; focus?: string }
+/** `focus`: the words selected (a note's words, or a whole text box). `picture`: Explain is about a picture or drawing, not words. */
+export interface AskRequest { question: string; context: string[]; images: AskImage[]; instruction?: string; mode?: AskMode; focus?: string; picture?: boolean }
 export interface AskAnswer { text: string; sources: { title: string; url: string }[]; searched: boolean; model?: string }
 
 export type QuotaWindow = 'minute' | 'day' | 'none' | 'unknown';
 export class GeminiError extends Error {
-  constructor(message: string, readonly kind: 'key' | 'quota' | 'unavailable' | 'blocked' | 'network' | 'other', readonly detail = '', readonly quota: QuotaWindow = 'unknown', readonly retrySeconds = 0) { super(message); }
+  constructor(message: string, readonly kind: 'key' | 'quota' | 'unavailable' | 'blocked' | 'network' | 'slow' | 'other', readonly detail = '', readonly quota: QuotaWindow = 'unknown', readonly retrySeconds = 0) { super(message); }
 }
 
 const BASE = 'You answer questions written on a personal note board, in Markdown. Use the attached notes and images as context when the question refers to "this" or "that".';
 /** Used only where the person's own instruction says nothing about length or format. */
 const DEFAULTS = "Defaults (the person's own instruction, if any, overrides them): a direct answer first, then short bullet points only if they help. No preamble.";
 const EXPLAIN = 'The person selected words in a note and asked you to explain them, in the sense they have in that note. After the explanation, add one line that starts with "Origin:" and gives the real etymology of the words. If you do not know a real etymology, write instead one line that starts with "Memory hook (made up):" with a short invented story that anchors the meaning; never present a made-up origin as real.';
-/** Ask on selected words: the typed question is the task; the words are only what it is about. */
-const ASK_ABOUT = 'The person selected words in a note and typed their own question about them. Answer that question directly and specifically, starting with the answer. Do not just define or explain the selected words unless the question asks for that.';
+/** Explain on a picture or drawing: no word origin, since there are no words to trace. */
+const EXPLAIN_PICTURE = 'The person selected a picture or drawing on their board and asked you to explain it: what it shows and what it means, in the sense it has among their notes.';
 export const MAX_INSTRUCTION = 2000;
 
 /**
- * The person's own instruction comes first and wins over the app's defaults
- * (it used to come last and lose to "reply concisely", so it looked ignored).
+ * Explain only (Ask sends no system instruction). The person's own
+ * instruction comes first and wins over the app's defaults (it used to come
+ * last and lose to "reply concisely", so it looked ignored).
  */
-export function systemText(request: Pick<AskRequest, 'instruction' | 'mode' | 'focus'>) {
+export function systemText(request: Pick<AskRequest, 'instruction' | 'picture'>) {
   const own = (request.instruction || '').trim().slice(0, MAX_INSTRUCTION);
   return [own ? `The person's own instruction for HOW to answer (style, tone, length, format). Follow it over the defaults below. It never changes WHAT to answer: always answer the question actually asked.\n${own}` : '',
-    BASE, request.mode === 'explain' ? EXPLAIN : request.focus ? ASK_ABOUT : '', DEFAULTS].filter(Boolean).join('\n\n');
+    BASE, request.picture ? EXPLAIN_PICTURE : EXPLAIN, DEFAULTS].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The message parts. Explain labels the notes for its system rules. Ask is
+ * plain: pictures, then "Context:" (the thread and selected notes), then
+ * "Selected:" (the words or text box it is about), then the prompt as typed.
+ */
+export function promptParts(request: AskRequest) {
+  const images = request.images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.data } }));
+  const context = request.context.map(text => text.trim()).filter(Boolean);
+  if (request.mode === 'explain') return [...images, ...context.map(text => ({ text: `Note on the board:\n${text}` })), { text: request.question.trim() }];
+  return [...images,
+    ...(context.length ? [{ text: `Context:\n${context.join('\n\n')}` }] : []),
+    ...(request.focus?.trim() ? [{ text: `Selected:\n${request.focus.trim()}` }] : []),
+    { text: request.question.trim() }];
 }
 
 /**
@@ -56,16 +77,14 @@ export const thinkingConfig = (model: string, fast: boolean) => thinkingConfigs(
 const acceptedThinking = new Map<string, number>();
 export const forgetThinking = () => acceptedThinking.clear();
 
+/** Explain and Ask both use the fastest thinking setting: speed matters more on a note board (Renz, 2026-11-20). */
+const FAST = true;
+
 export function geminiBody(request: AskRequest, search: boolean, model = '', step = 0) {
-  const notes = request.context.filter(text => text.trim()).map(text => `Note on the board:\n${text.trim()}`);
-  const config = thinkingConfigs(model, request.mode === 'explain')[step];
+  const config = thinkingConfigs(model, FAST)[step];
   return {
-    systemInstruction: { parts: [{ text: systemText(request) }] },
-    contents: [{ role: 'user', parts: [
-      ...request.images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
-      ...notes.map(text => ({ text })),
-      { text: request.question.trim() },
-    ] }],
+    ...(request.mode === 'explain' ? { systemInstruction: { parts: [{ text: systemText(request) }] } } : {}),
+    contents: [{ role: 'user', parts: promptParts(request) }],
     ...(search ? { tools: [{ google_search: {} }] } : {}),
     ...(config ? { generationConfig: { thinkingConfig: config } } : {}),
   };
@@ -100,9 +119,9 @@ export function sseChunks(buffer: string): { chunks: any[]; rest: string } {
   return { chunks, rest };
 }
 
-async function readStream(response: Response, onText: (text: string) => void) {
+async function readStream(response: Response, onText: (text: string) => void, onFirst: () => void = () => undefined) {
   const chunks: any[] = [];
-  const take = (found: any[]) => { if (!found.length) return; chunks.push(...found); const merged = mergeStreamChunks(chunks); onText(merged.candidates[0].content.parts[0]?.text || ''); };
+  const take = (found: any[]) => { if (!found.length) return; onFirst(); chunks.push(...found); const merged = mergeStreamChunks(chunks); onText(merged.candidates[0].content.parts[0]?.text || ''); };
   if (!response.body) { take(sseChunks(`${await response.text()}\n`).chunks); return mergeStreamChunks(chunks); }
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer = '';
@@ -169,30 +188,52 @@ function failure(status: number, body: any): GeminiError {
  * answer streams in as it is written. Term look-ups skip search: they need
  * the thread, not the web, and search adds a wait.
  */
-export async function askGemini(apiKey: string, request: AskRequest, options: { signal?: AbortSignal; fetcher?: typeof fetch; models?: string[]; onText?: (text: string) => void } = {}): Promise<AskAnswer> {
-  const fetcher = options.fetcher || fetch, onText = options.onText;
+export async function askGemini(apiKey: string, request: AskRequest, options: { signal?: AbortSignal; fetcher?: typeof fetch; models?: string[]; onText?: (text: string) => void; firstByteMs?: number; now?: () => number } = {}): Promise<AskAnswer> {
+  const fetcher = options.fetcher || fetch, onText = options.onText, now = options.now || Date.now, outer = options.signal;
+  // Once a try was too slow, the rest wait as long as it takes: a slow network should get an answer, not "took too long" eight times.
+  let patient = false;
   const send = async (model: string, search: boolean, step: number) => {
-    let response: Response;
+    // Each try has its own cancel: the person's Cancel stops it, and so does a model that has not started answering in time (often "overloaded").
+    const attempt = new AbortController(), started = now(), stop = () => attempt.abort();
+    let slow = false;
+    const body = JSON.stringify(geminiBody(request, search, model, step));
+    // Sending pictures takes time on a slow uplink: allow 1 s per 100 KB on top of the wait for the first words.
+    const timer = patient ? undefined : setTimeout(() => { slow = true; attempt.abort(); }, (options.firstByteMs ?? FIRST_BYTE_MS) + Math.round(body.length / 100));
+    const first = () => clearTimeout(timer);
+    if (outer?.aborted) attempt.abort(); else outer?.addEventListener('abort', stop);
+    const late = () => { trace(model, search, 'no words in time', started, now); return new GeminiError('Gemini took too long to start answering.', 'slow'); };
     try {
-      response = await fetcher(`${ENDPOINT}/${model}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, { method: 'POST', signal: options.signal,
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(geminiBody(request, search, model, step)) });
-    } catch (error) {
-      if ((error as Error)?.name === 'AbortError') throw error;
-      throw new GeminiError('Could not reach Gemini. Check your connection.', 'network');
-    }
-    if (!response.ok) throw failure(response.status, await response.json().catch(() => null));
-    onText?.('');
-    let json: any;
-    try { json = onText ? await readStream(response, onText) : await response.json().catch(() => null); }
-    catch (error) {
-      if ((error as Error)?.name === 'AbortError' || error instanceof GeminiError) throw error;
-      throw new GeminiError('The connection to Gemini dropped while it was answering. Try again.', 'network');
-    }
-    return { ...readGeminiAnswer(json, search), model };
+      let response: Response;
+      try {
+        response = await fetcher(`${ENDPOINT}/${model}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, { method: 'POST', signal: attempt.signal,
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body });
+      } catch (error) {
+        if (slow) throw late();
+        if ((error as Error)?.name === 'AbortError') throw error;
+        throw new GeminiError('Could not reach Gemini. Check your connection.', 'network');
+      }
+      if (!response.ok) {
+        first();
+        const error = failure(response.status, await response.json().catch(() => null));
+        trace(model, search, `${response.status} ${error.kind}${error.kind === 'quota' ? ` (${error.quota})` : ''}`, started, now);
+        throw error;
+      }
+      onText?.('');
+      let json: any;
+      try { json = onText ? await readStream(response, onText, first) : await response.json().catch(() => null); }
+      catch (error) {
+        if (slow) throw late();
+        if ((error as Error)?.name === 'AbortError' || error instanceof GeminiError) throw error;
+        throw new GeminiError('The connection to Gemini dropped while it was answering. Try again.', 'network');
+      }
+      first();
+      trace(model, search, 'answered', started, now);
+      return { ...readGeminiAnswer(json, search), model };
+    } finally { clearTimeout(timer); outer?.removeEventListener('abort', stop); }
   };
   // A model that rejects a thinking setting is asked again with the next one; the accepted step is remembered.
   const call = async (model: string, search: boolean) => {
-    const fast = request.mode === 'explain', key = `${model}|${fast}`, last = thinkingConfigs(model, fast).length - 1;
+    const key = `${model}|${FAST}`, last = thinkingConfigs(model, FAST).length - 1;
     for (let step = acceptedThinking.get(key) || 0; ; step++) {
       try { const answer = await send(model, search, step); acceptedThinking.set(key, step); return answer; }
       catch (error) {
@@ -202,18 +243,52 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
     }
   };
   const failures: GeminiError[] = [];
-  for (const model of options.models || GEMINI_MODELS) {
-    for (const search of request.mode === 'explain' ? [false] : [true, false]) {
-      try { return await call(model, search); }
-      catch (error) {
-        if (!(error instanceof GeminiError) || !['quota', 'unavailable', 'other'].includes(error.kind)) throw error;
-        failures.push(error);
-      }
+  for (const [model, search] of routeOrder(options.models || GEMINI_MODELS, request.mode === 'explain' ? [false] : [true, false], now())) {
+    try { const answer = await call(model, search); lastGood = routeKey(model, search); cooling.delete(lastGood); return answer; }
+    catch (error) {
+      if (!(error instanceof GeminiError) || !['quota', 'unavailable', 'other', 'slow'].includes(error.kind)) throw error;
+      cooling.set(routeKey(model, search), now() + coolMs(error));
+      if (error.kind === 'slow') patient = true;
+      failures.push(error);
     }
   }
   // Report the most useful reason: a short wait beats a daily limit beats no allowance.
   const rank = (error: GeminiError) => error.kind !== 'quota' ? 4 : ({ minute: 0, day: 1, unknown: 2, none: 3 } as const)[error.quota];
   throw [...failures].sort((a, b) => rank(a) - rank(b))[0] || new GeminiError('Gemini could not answer.', 'other');
+}
+
+/** How long a model may take to send its first words before the next one is tried. */
+export const FIRST_BYTE_MS = 20000;
+
+/**
+ * Why later questions got slow: every question started again at the first
+ * model with search, so once the free per-minute limit was hit, each one
+ * waited through the same failed tries. Now a route (model + search) that
+ * failed rests for a while, and the last route that answered goes first.
+ */
+const cooling = new Map<string, number>();
+let lastGood = '';
+export const forgetRoutes = () => { cooling.clear(); lastGood = ''; };
+const routeKey = (model: string, search: boolean) => `${model}|${search ? 'search' : 'plain'}`;
+export function coolMs(error: GeminiError) {
+  const minute = 60_000;
+  if (error.kind === 'quota') return error.quota === 'minute' ? Math.max(error.retrySeconds, 20) * 1000 : error.quota === 'day' ? 60 * minute : error.quota === 'none' ? 24 * 60 * minute : 10 * minute;
+  if (error.kind === 'unavailable') return 24 * 60 * minute;
+  if (error.kind === 'slow') return 2 * minute;
+  return minute;
+}
+/** Routes to try: rested ones first (the last good one at the front), then resting ones, soonest-ready first, as a last resort. */
+export function routeOrder(models: readonly string[], searches: readonly boolean[], at: number): [string, boolean][] {
+  const all = models.flatMap(model => searches.map(search => [model, search] as [string, boolean]));
+  const until = (route: [string, boolean]) => cooling.get(routeKey(...route)) || 0;
+  const ready = all.filter(route => until(route) <= at), resting = all.filter(route => until(route) > at).sort((a, b) => until(a) - until(b));
+  const good = ready.findIndex(route => routeKey(...route) === lastGood);
+  if (good > 0) ready.unshift(...ready.splice(good, 1));
+  return [...ready, ...resting];
+}
+/** One line per try in the browser console (model, search, result, time), to see where a slow answer spent its time. */
+function trace(model: string, search: boolean, result: string, started: number, now: () => number) {
+  try { console.info(`[Ask AI] ${model}${search ? ' +search' : ''}: ${result} in ${now() - started} ms`); } catch { /* console is optional */ }
 }
 
 /** Confirm Google accepts a key before saving it; a lightweight model listing, no generation. */

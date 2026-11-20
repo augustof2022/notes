@@ -28,6 +28,28 @@ export function askSelection(elements: readonly ExcalidrawElement[], selected: R
   return { texts, images, skippedImages, anchor };
 }
 
+/** A whole selected object for Explain/Ask: its words, its pictures, and whether a drawing must be sent as a snapshot. */
+export interface ObjectContent { text: string; images: AskImage[]; members: ExcalidrawElement[]; snapshot: boolean; kind: 'text' | 'image' | 'drawing' }
+export const MAX_OBJECT_TEXT = 4000;
+
+/**
+ * What a selected object (or its group) holds: text boxes and shape labels
+ * become words; pictures go as they are. Shapes and drawings with no words
+ * and no picture are sent as a snapshot, so "what is this?" has something to see.
+ */
+export function objectContent(elements: readonly ExcalidrawElement[], members: readonly ExcalidrawElement[], files: BinaryFiles): ObjectContent {
+  const ids = new Set(members.map(element => element.id));
+  const words = [...members].sort((a, b) => a.y - b.y || a.x - b.x).flatMap(element => {
+    const label = element.type === 'text' ? element : elements.find(item => item.type === 'text' && !item.isDeleted && item.containerId === element.id && !ids.has(item.id));
+    return label?.type === 'text' && (label.originalText || label.text).trim() ? [(label.originalText || label.text).trim()] : [];
+  });
+  const text = words.join('\n\n').slice(0, MAX_OBJECT_TEXT);
+  const images = askSelection(members, Object.fromEntries(members.map(element => [element.id, true])), files).images;
+  // Pictures Gemini cannot take as they are (SVG, GIF, very large, not loaded yet) and wordless drawings go as a PNG snapshot.
+  const snapshot = !text && !images.length && members.length > 0;
+  return { text, images, members: [...members], snapshot, kind: text ? 'text' : images.length || members.some(element => element.type === 'image') ? 'image' : 'drawing' };
+}
+
 /** Markdown for the answer note, with up to five linked sources from Google Search. */
 export function answerMarkdown(answer: AskAnswer) {
   const sources = answer.sources.map(source => `[${source.title.replace(/[[\]]/g, '')}](${source.url})`);

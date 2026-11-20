@@ -1,8 +1,12 @@
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { DiagramEdgeSettings, DiagramStyle } from './diagram-scene';
 
-/** What Explain or Ask was started with: the selected words in a note, and the person's own question for Ask. */
-export interface LearnSelection { kind: 'explain' | 'ask'; sourceId: string; selection: string; question?: string }
+/**
+ * What Explain or Ask was started with: the selected words in a note (or,
+ * with `object`, the whole selected object: a text box, shape, picture or
+ * drawing), and the person's own prompt for Ask.
+ */
+export interface LearnSelection { kind: 'explain' | 'ask'; sourceId: string; selection: string; question?: string; object?: boolean; /** Set by Ask AI when it takes the request (it refuses while another answer is running). */ accepted?: boolean }
 
 /** Dispatched on the board by the text editor's Explain and Ask buttons; Ask AI answers it. */
 export const LEARN_EVENT = 'note-learn-ask';
@@ -16,14 +20,15 @@ export function cleanSelection(text: string) {
 }
 
 /** The node that holds what was selected (and the question asked about it). */
-export function selectionNodeText(selection: string, question?: string) {
-  return question?.trim() ? `“${chipWords(selection)}”\nQ: ${question.trim()}` : `“${chipWords(selection)}”`;
+export function selectionNodeText(selection: string, question?: string, label?: string) {
+  const head = label || `“${chipWords(selection)}”`;
+  return question?.trim() ? `${head}\nQ: ${question.trim()}` : head;
 }
 
-/** The prompt sent to Gemini for each kind. */
+/** The prompt sent to Gemini: Explain asks about the words (or the picture); Ask sends the person's prompt exactly as typed. */
 export function learnQuestion({ kind, selection, question }: Pick<LearnSelection, 'kind' | 'selection' | 'question'>) {
-  return kind === 'explain' ? `Explain “${selection}”, in the sense it has in my note.`
-    : `My question: ${(question || '').trim()}\n\n(It is about these words I selected in my note: “${selection}”.)`;
+  if (kind === 'ask') return (question || '').trim();
+  return selection ? `Explain “${selection}”, in the sense it has in my note.` : 'Explain this.';
 }
 
 /**
