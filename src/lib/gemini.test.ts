@@ -107,15 +107,18 @@ it('turns a mid-stream error into a clear failure instead of a cut-off note', as
   await expect(askGemini('KEY', request, { fetcher, models: ['gemini-2.5-flash'], onText: () => undefined })).rejects.toMatchObject({ kind: 'quota', quota: 'minute' });
 });
 
-it('explains a clicked term without search, adds the standing instruction, and marks terms in every answer', async () => {
+it('explains selected words without search, with the person’s instruction first and in charge', async () => {
   const fetcher = vi.fn(() => reply(200, answer)) as unknown as typeof fetch;
-  await askGemini('KEY', { ...request, mode: 'term', instruction: 'Explain like Feynman.' }, { fetcher });
+  await askGemini('KEY', { ...request, mode: 'explain', instruction: 'Answer in exactly 3 bullet points.' }, { fetcher });
   const body = JSON.parse((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
   expect(body.tools).toBeUndefined();
-  const system = body.systemInstruction.parts[0].text;
-  expect(system).toContain('[[double brackets]]');
+  const system: string = body.systemInstruction.parts[0].text;
+  expect(system.startsWith('The person\'s own instruction.')).toBe(true);
+  expect(system.indexOf('Answer in exactly 3 bullet points.')).toBeLessThan(system.indexOf('Defaults'));
+  expect(system).toContain('priority over everything below');
   expect(system).toContain('Memory hook (made up):');
-  expect(system).toContain('Explain like Feynman.');
+  expect(system).not.toContain('[[');
   expect(systemText({})).not.toContain('Memory hook');
+  expect(systemText({}).startsWith('You answer questions')).toBe(true);
   expect(systemText({ instruction: 'x'.repeat(3000) }).length).toBeLessThan(3000);
 });

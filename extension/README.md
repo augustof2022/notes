@@ -12,7 +12,7 @@ Sends the page you are reading to Note, so you can ask about it in the **Learn**
 
 1. Open a board in Note (signed in) in one tab.
 2. On any web page, click the helper's toolbar button, press **Alt+Shift+N**, or right-click → **Send to Note Learn**. Select text first to send your selection too.
-3. Note comes to the front with a 📄 page card selected. Ask about the page in the Learn panel. Answers appear under the card; tap a term to open its own thread under that answer.
+3. Note comes to the front with a 📄 page card selected. Double-click it, select words, and choose **Explain** or **Ask**. Each answer appears in connected notes to the right; repeat on any of them.
 
 ## What it reads and where it goes
 

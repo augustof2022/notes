@@ -48,3 +48,44 @@
 .note-jot-bar{position:fixed;z-index:2;pointer-events:auto;display:flex;gap:4px;justify-content:center;max-width:480px;margin:0 auto;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow)}
 .note-jot-bar button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:40px;padding:0 10px;border-radius:8px;color:var(--ink);font-size:13px}
 .note-jot-bar button:active{background:var(--accent-light);color:var(--accent)}
+
+/* Explain / Ask (design: ui-designer spec 2026-11-20). Tokens only; #7760d5 only where the app already uses it for primary buttons. */
+
+/* Toolbar: the bar grows when the AI buttons are present. */
+.note-text-selection-bar.has-ai{width:min(400px,calc(100vw - 16px))}
+.note-text-ai-divider{flex:none;width:1px;align-self:stretch;margin:5px 3px;background:var(--line)}
+.note-text-selection-bar .note-text-ai{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;padding:0 10px;font-size:12px;font-weight:550;white-space:nowrap;color:var(--ink)}
+.note-text-selection-bar .note-text-ai.is-primary{color:var(--accent);background:var(--accent-light)}
+.note-text-selection-bar .note-text-ai:hover:not(:disabled){background:var(--accent-light);color:var(--accent)}
+.note-text-selection-bar .note-text-ai:disabled{opacity:.5;cursor:not-allowed}
+
+/* Ask: a small form that takes the bar's place (laptop) or docks above the keyboard (phone). */
+.note-text-ask{position:fixed;z-index:1;pointer-events:auto;display:flex;flex-direction:column;gap:6px;width:min(380px,calc(100vw - 16px));padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
+.note-text-ask-about{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:var(--muted)}
+.note-text-ask-about svg{color:var(--accent);flex-shrink:0}
+.note-text-ask-about span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.note-text-ask-about b{font-weight:550;color:var(--ink)}
+.note-text-ask-row{display:flex;align-items:flex-end;gap:4px}
+.note-text-ask textarea{flex:1;min-width:0;min-height:36px;max-height:120px;resize:none;margin:0;padding:8px 10px;font-size:14px;line-height:1.4;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink)}
+.note-text-ask textarea:focus{outline:2px solid #ad97ef55;border-color:var(--accent)}
+.note-text-ask-row button{display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:7px;color:var(--muted)}
+.note-text-ask-row button:hover{background:var(--accent-light);color:var(--accent)}
+.note-text-ask-row .note-text-ask-send{background:#7760d5;color:#fff}
+.note-text-ask-row .note-text-ask-send:hover{background:#6651c4;color:#fff}
+.note-text-ask-row .note-text-ask-send:disabled{opacity:.45;cursor:default;background:#7760d5}
+.note-text-ask small{font-size:10px;color:var(--muted)}
+
+/* Phone: AI actions get their own full-width row on top; formatting row below. */
+@media(max-width:600px){
+  .note-text-selection-bar.has-ai{flex-wrap:wrap;row-gap:4px;width:calc(100vw - 16px)}
+  .note-text-selection-bar .note-text-ai{order:-2;flex:1 1 40%;min-height:40px;font-size:13px}
+  .note-text-selection-bar.has-ai .note-text-ai-divider{order:-1;flex-basis:100%;width:auto;height:1px;margin:0 2px}
+  .note-text-ask{width:calc(100vw - 16px)}
+  .note-text-ask small{display:none}
+}
+@media(pointer:coarse){
+  .note-text-selection-bar .note-text-ai{min-height:40px}
+  .note-text-ask textarea{font-size:16px;min-height:40px}
+  .note-text-ask-row button{width:40px;height:40px}
+  .note-text-ask small{display:none}
+}

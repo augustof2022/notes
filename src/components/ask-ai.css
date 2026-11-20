@@ -16,10 +16,5 @@
 .modal textarea:focus{outline:2px solid #ad97ef55;border-color:var(--accent)}
 .ask-ai-detail{font-size:11px;color:var(--muted);margin-top:-8px}.ask-ai-detail summary{cursor:pointer}.ask-ai-detail p{margin-top:8px;line-height:1.6;overflow-wrap:anywhere;user-select:text}
 
-/* With the Learn panel open on a wide board, centre the live answer in the space left of it. */
-@media(min-width:761px){
-  .board-canvas:has(>.learn-panel)>.ask-ai-status{left:max(156px,calc((100% - 344px)/2))}
-  .board-canvas:has(>.learn-panel)>.ask-ai-status.streaming{width:max(280px,min(520px,calc(100% - 376px)))}
-}
 @media(max-width:760px){.ask-ai-preview{max-height:min(24dvh,190px)}}
 @media(pointer:coarse){.ask-ai-status button{width:40px;height:40px}.modal textarea{font-size:16px}}

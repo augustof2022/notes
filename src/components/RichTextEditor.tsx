@@ -1,20 +1,25 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { AllSelection, Selection } from '@tiptap/pm/state';
-import { Bold, Italic, Underline, Strikethrough, Link2, Check, X, CornerDownRight, ArrowDownToLine, IndentDecrease, IndentIncrease, Sparkles } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link2, Check, X, CornerDownRight, ArrowDownToLine, IndentDecrease, IndentIncrease, Sparkles, MessageCircleQuestion, ArrowUp } from 'lucide-react';
 import { cleanRichDoc, clipboardRichDoc, richTextExtensions, safeTextLink, type RichDoc } from '../lib/rich-text';
 import { diagramShortcutRelation, type DiagramShortcutRelation } from '../lib/diagram-shortcuts';
 import { slashMatch, textCommands, textPopupPosition, type SlashMatch, type TextCommand } from '../lib/text-commands';
 import './rich-text.css';
 
+/** Touch screens: the phone's own copy/paste menu sits above a selection, so our bar goes below it. */
+const coarsePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+
 type Popup = { left: number; top: number };
 export type JotIndent = 'indent' | 'outdent';
-export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, jot, jotButtons, onJotIndent, onAsk, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
+export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagram, jot, jotButtons, onJotIndent, onAsk, onLearn, selectAll, position, width, zoom, angle, minHeight, boardBounds, undoCreation, onUndoCreation, onApply, onDraft, onHeight, onCaretPan }: {
   doc: RichDoc; fontSize: number; color: string; textAlign: 'left' | 'center' | 'right'; diagram: boolean; selectAll: boolean;
   /** Standalone text: Tab/Shift+Tab start a new child/sibling note below. */
   jot: boolean; jotButtons: boolean; onJotIndent: (direction: JotIndent) => void;
   /** Save this note, then ask AI about it (Alt+Enter). */
   onAsk: () => void;
+  /** Save this note, then Explain the selected words, or Ask about them with the person's question. */
+  onLearn?: (kind: 'explain' | 'ask', selection: string, question?: string) => void;
   position: Popup; width: number; zoom: number; angle: number; minHeight: number; opacity: number;
   boardBounds: { left: number; top: number; right: number; bottom: number }; onCaretPan: (dx: number, dy: number) => void;
   undoCreation: boolean; onUndoCreation: () => boolean;
@@ -27,9 +32,10 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   const [active, setActive] = useState(0), activeRef = useRef(0);
   const [menuPosition, setMenuPosition] = useState<Popup>({ left: 8, top: 8 }), [barPosition, setBarPosition] = useState<Popup | null>(null);
   const [link, setLink] = useState<string | null>(null), linkRef = useRef<string | null>(null), [linkError, setLinkError] = useState('');
+  const [ask, setAsk] = useState<string | null>(null), asked = useRef('');
   const [, refresh] = useState(0);
   const panPending = useRef(false);
-  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk };
+  const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk, onLearn }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk, onLearn };
   const finish = (relation?: DiagramShortcutRelation, focusCanvas = true) => latest.current.onApply(cleanRichDoc(draft.current), relation, focusCanvas);
   const viewport = () => ({ width: window.visualViewport?.width || innerWidth, height: window.visualViewport?.height || innerHeight, left: window.visualViewport?.offsetLeft || 0, top: window.visualViewport?.offsetTop || 0 });
   function updateControls() {
@@ -54,7 +60,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
     if (next) setMenuPosition(textPopupPosition(coords, { width: Math.min(270, screen.width - 16), height: Math.min(textCommands(next.query).length * 42 + 12, 300, screen.height - 24) }, screen));
     if (!selection.empty && current.state.doc.textBetween(selection.from, selection.to).trim()) {
       const end = current.view.coordsAtPos(selection.to);
-      setBarPosition(textPopupPosition({ left: Math.min(coords.left, end.left), top: Math.min(coords.top, end.top), bottom: Math.max(coords.bottom, end.bottom) }, { width: Math.min(264, screen.width - 16), height: 42 }, screen, true));
+      setBarPosition(textPopupPosition({ left: Math.min(coords.left, end.left), top: Math.min(coords.top, end.top), bottom: Math.max(coords.bottom, end.bottom) }, { width: Math.min(latest.current.onLearn ? 400 : 264, screen.width - 16), height: latest.current.onLearn && screen.width <= 600 ? 92 : 42 }, screen, !coarsePointer()));
     } else setBarPosition(null);
     refresh(value => value + 1);
   }
@@ -153,6 +159,17 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   }, [editor]);
   useLayoutEffect(() => { if (editor) updateControls(); }, [position.left, position.top, zoom, width]);
   useLayoutEffect(() => { surface.current?.querySelector('[data-command-active="true"]')?.scrollIntoView({ block: 'nearest' }); }, [active]);
+  /** The selected words, as plain text. */
+  function selectedText() { const current = editorRef.current; if (!current) return ''; const { from, to } = current.state.selection; return current.state.doc.textBetween(from, to, ' ', ' ').trim(); }
+  function explain() { const words = selectedText(); if (!words) return; finish(undefined, false); latest.current.onLearn?.('explain', words); }
+  function startAsk() { asked.current = selectedText(); if (asked.current) setAsk(''); }
+  function sendAsk() { const question = (ask || '').trim(); if (!question || !asked.current) return; setAsk(null); finish(undefined, false); latest.current.onLearn?.('ask', asked.current, question); }
+  /** Laptop: where the bar was. Phone: docked just above the on-screen keyboard. */
+  function askPosition(): CSSProperties {
+    if (!coarsePointer()) return barPosition || menuPosition;
+    const screen = viewport();
+    return { left: screen.left + 8, width: screen.width - 16, top: screen.top + screen.height - 8, transform: 'translateY(-100%)' };
+  }
   function openLink() { const href = editor?.getAttributes('link').href || 'https://'; linkRef.current = href; setLink(href); setLinkError(''); }
   const style = { left: position.left, top: position.top, width: width * zoom } as CSSProperties;
   const height = editor && !editor.isDestroyed ? editor.view.dom.offsetHeight : minHeight;
@@ -164,7 +181,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
     <div className="note-inline-text-surface" style={{ width, transform: `scale(${zoom})`, clipPath, fontSize, color, opacity, textAlign, minHeight }}>
       <div style={{ transform: `rotate(${angle}rad)`, transformOrigin: 'center center' }}><EditorContent editor={editor} /></div>
     </div>
-    {jot && jotButtons && <div className="note-jot-bar" role="toolbar" aria-label="Add notes" style={{ left: viewport().left + 8, top: viewport().top + viewport().height - 56, width: viewport().width - 16 }} onPointerDown={event => event.preventDefault()}>
+    {jot && jotButtons && ask === null && <div className="note-jot-bar" role="toolbar" aria-label="Add notes" style={{ left: viewport().left + 8, top: viewport().top + viewport().height - 56, width: viewport().width - 16 }} onPointerDown={event => event.preventDefault()}>
       <button type="button" onClick={() => finish('sibling', false)} title="New note below (Shift+Tab)"><ArrowDownToLine size={16} /><span>Below</span></button>
       <button type="button" onClick={() => finish('child', false)} title="New indented note (Tab)"><CornerDownRight size={16} /><span>Child</span></button>
       <button type="button" aria-label="Move left a level" onClick={() => latest.current.onJotIndent('outdent')} title="Move left a level (Ctrl+[)"><IndentDecrease size={16} /></button>
@@ -175,11 +192,21 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
     {slash && <div className="note-text-commands" role="listbox" aria-label="Text commands" style={{ ...menuPosition, maxHeight: Math.min(300, viewport().height - 24) }} onMouseDown={event => event.preventDefault()}>
       {textCommands(slash.query).map((item, index) => <button role="option" aria-selected={active === index} data-command-active={active === index} key={item.id} onPointerEnter={() => { activeRef.current = index; setActive(index); }} onClick={() => command(item.id)}><span className="note-command-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}
     </div>}
-    {!slash && barPosition && <div className="note-text-selection-bar" role="toolbar" aria-label="Format selected text" style={barPosition}>
+    {!slash && ask === null && barPosition && <div className={`note-text-selection-bar${onLearn ? ' has-ai' : ''}`} role="toolbar" aria-label="Format selected text" style={barPosition}>
       {button('Bold (Ctrl+B)', <Bold size={16} />, 'bold')}{button('Italic (Ctrl+I)', <Italic size={16} />, 'italic')}{button('Underline (Ctrl+U)', <Underline size={16} />, 'underline')}{button('Strikethrough', <Strikethrough size={16} />, 'strike')}
       <label className="note-text-color" title="Text color"><span>A</span><input type="color" aria-label="Text color" defaultValue={/^#[\da-f]{6}$/i.test(color) ? color : '#1b1b1f'} onChange={event => { editor?.chain().setColor(event.target.value).run(); editor?.view.focus(); }} /></label>
       <button aria-label="Add or edit link" title="Link (Ctrl+K)" onMouseDown={event => event.preventDefault()} onClick={openLink}><Link2 size={16} /></button>
+      {onLearn && <><span className="note-text-ai-divider" aria-hidden />
+        <button className="note-text-ai is-primary" aria-label="Explain the selected words" title="Explain the selected words in a new connected note" onMouseDown={event => event.preventDefault()} onClick={explain}><Sparkles size={16} /><span>Explain</span></button>
+        <button className="note-text-ai" aria-label="Ask about the selected words" title="Ask your own question about the selected words" onMouseDown={event => event.preventDefault()} onClick={startAsk}><MessageCircleQuestion size={16} /><span>Ask</span></button></>}
     </div>}
+    {ask !== null && <form className="note-text-ask" style={askPosition()} onSubmit={event => { event.preventDefault(); sendAsk(); }}>
+      <span className="note-text-ask-about" title={asked.current}><MessageCircleQuestion size={14} /><span>Ask about <b>“{asked.current.length > 60 ? `${asked.current.slice(0, 59)}…` : asked.current}”</b></span></span>
+      <div className="note-text-ask-row"><textarea aria-label="Your question" rows={1} maxLength={500} value={ask} autoFocus placeholder="Your question" onChange={event => { setAsk(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(120, event.target.scrollHeight)}px`; }}
+        onKeyDown={event => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendAsk(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setAsk(null); editorRef.current?.view.focus(); } }} />
+        <button className="note-text-ask-send" aria-label="Send question" type="submit" disabled={!ask.trim()}><ArrowUp size={16} /></button><button aria-label="Cancel" type="button" onClick={() => { setAsk(null); editorRef.current?.view.focus(); }}><X size={16} /></button></div>
+      <small>Enter to send · Shift+Enter for a new line · Esc to cancel</small>
+    </form>}
     {link !== null && <form className="note-text-link" style={barPosition || menuPosition} onSubmit={event => {
       event.preventDefault(); const href = safeTextLink(linkRef.current); if (!href && linkRef.current) { setLinkError('Use an https://, http://, mailto:, or tel: link.'); return; }
       if (href) editor?.chain().extendMarkRange('link').setLink({ href }).run(); else editor?.chain().extendMarkRange('link').unsetLink().run();
