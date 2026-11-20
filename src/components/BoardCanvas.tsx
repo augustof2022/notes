@@ -356,7 +356,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <LayersSidebar api={api} root={canvasRoot} scope={board.key} onMessage={onMessage} />}
     {api && ready && <MoveHandle api={api} root={canvasRoot} />}
     {api && ready && <AskAiTools api={api} root={canvasRoot} client={client} owner={board.scope} onMessage={onMessage} />}
-        {api && ready && <LearnPanel api={api} root={canvasRoot} onMessage={onMessage} />}
+      {api && ready && <LearnPanel api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <BoardFind api={api} root={canvasRoot} scope={board.scope} zoomLocked={() => !!viewLock.current} />}
     {api && ready && <ObjectColors api={api} root={canvasRoot} />}
     {api && ready && <StampTools api={api} root={canvasRoot} onMessage={onMessage} />}

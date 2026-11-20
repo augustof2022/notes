@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { askGemini, geminiBody, GeminiError, googleAiModeUrl, mergeStreamChunks, sseChunks, systemText, thinkingConfig, verifyGeminiKey } from './gemini';
+import { askGemini, geminiBody, GeminiError, googleAiModeUrl, forgetThinking, mergeStreamChunks, sseChunks, systemText, thinkingConfig, verifyGeminiKey } from './gemini';
 
 const reply = (status: number, body: object) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
 const answer = { candidates: [{ content: { parts: [{ text: 'A **heat pump**.' }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/a', title: 'Example' } }, { web: { uri: 'https://example.com/a', title: 'Dup' } }, { web: { uri: 'javascript:alert(1)', title: 'Bad' } }] } }] };
@@ -86,14 +86,25 @@ it('turns thinking down: off or minimal for terms, low otherwise, untouched wher
   expect(thinkingConfig('gemini-flash-latest', true)).toEqual({ thinkingLevel: 'minimal' });
   expect(thinkingConfig('gemini-flash-latest', false)).toEqual({ thinkingLevel: 'low' });
   expect(geminiBody(request, false, 'gemini-flash-latest').generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'low' } });
-  expect(geminiBody(request, false, 'gemini-flash-latest', false).generationConfig).toBeUndefined();
+  expect(geminiBody(request, false, 'gemini-flash-latest', 1).generationConfig).toBeUndefined();
+  expect(thinkingConfig('gemini-2.5-pro', true)).toBeUndefined();
 });
 
-it('asks again without the thinking setting when a model rejects it', async () => {
+it('steps down the thinking setting when a model rejects it, and remembers what worked', async () => {
+  forgetThinking();
   const fetcher = vi.fn((_url: string, init: RequestInit) => JSON.parse(String(init.body)).generationConfig
     ? reply(400, { error: { message: 'Thinking level is not supported for this model.' } }) : reply(200, answer)) as unknown as typeof fetch;
   const result = await askGemini('KEY', request, { fetcher });
   expect(result).toMatchObject({ model: 'gemini-flash-latest', searched: true });
+  const calls = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+  await askGemini('KEY', request, { fetcher });
+  expect((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(calls + 1);
+  forgetThinking();
+});
+
+it('turns a mid-stream error into a clear failure instead of a cut-off note', async () => {
+  const fetcher = vi.fn(() => sse([{ candidates: [{ content: { parts: [{ text: 'Half' }] } }] }, { error: { code: 429, message: 'Resource exhausted. PerMinute' } }])) as unknown as typeof fetch;
+  await expect(askGemini('KEY', request, { fetcher, models: ['gemini-2.5-flash'], onText: () => undefined })).rejects.toMatchObject({ kind: 'quota', quota: 'minute' });
 });
 
 it('explains a clicked term without search, adds the standing instruction, and marks terms in every answer', async () => {

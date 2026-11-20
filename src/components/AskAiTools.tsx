@@ -29,12 +29,12 @@ export interface LearnAsk { parentId: string; question: string; term?: string }
 export function AskAiTools({ api, root, client, owner, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null; client: SupabaseClient | null; owner: string; onMessage: (message: string) => void }) {
   const [host, setHost] = useState<Element | null>(null), [dialog, setDialog] = useState<Dialog>(null), [asking, setAsking] = useState(false), [preview, setPreview] = useState('');
   const [sealed, setSealed] = useState<SealedAiKey | null | undefined>(undefined);
-  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null);
+  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null), busy = useRef(false);
   const signedIn = !!client && owner !== 'local';
   useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
-    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnAsk>).detail; if (!detail?.parentId || !detail.question.trim()) return; if (abort.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
+    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnAsk>).detail; if (!detail?.parentId || !detail.question.trim()) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
     root?.addEventListener('note-ask-ai', request); root?.addEventListener('note-learn-ask', learn);
     return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener('note-learn-ask', learn); };
   }, [root, client, owner]);
@@ -69,12 +69,18 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     return { request: { question, context, images: [], instruction: readAiInstruction(), mode: term ? 'term' : 'ask' }, anchorId: ask.parentId, parentId: ask.parentId, header: term ? { term } : { question } };
   }
   async function start() {
-    if (asking) return;
+    if (busy.current) return;
     const next = selectionRequest();
     if (!next.request.question.trim()) { pending.current = next; setDialog({ mode: 'ask' }); return; }
     await proceed(next);
   }
+  /** One question at a time: busy covers loading the key as well as the answer. */
   async function proceed(next: Pending) {
+    if (busy.current) return;
+    busy.current = true;
+    try { await prepare(next); } finally { if (!abort.current) busy.current = false; }
+  }
+  async function prepare(next: Pending) {
     pending.current = next;
     if (!signedIn) { setDialog({ mode: 'error', message: 'Ask AI needs a signed-in Google account so your encrypted key can be saved. You can still use Ask Google.' }); return; }
     let key: Awaited<ReturnType<typeof readyKey>>;
@@ -83,19 +89,19 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     await run(key, next);
   }
   async function run(key: string, next: Pending) {
-    pending.current = next; setDialog(null); setAsking(true); setPreview('');
+    pending.current = next; busy.current = true; setDialog(null); setAsking(true); setPreview('');
     const controller = new AbortController(); abort.current = controller;
     try {
       const answer = await askGemini(key, next.request, { signal: controller.signal, onText: setPreview });
       placeAnswer(answerMarkdown(answer, next.header), next, answer.model || 'gemini', answerTerms(answer.text));
       pending.current = null;
-      if (!answer.searched) onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
+      if (!answer.searched && next.request.mode !== 'term') onMessage('Answered without Google Search (its free allowance may be used up), so it may miss recent facts.');
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') return;
       const message = error instanceof Error ? error.message : 'Gemini could not answer.';
       if (error instanceof GeminiError && error.kind === 'key') apiKey.current = null;
       setDialog({ mode: 'error', message, key: error instanceof GeminiError && error.kind === 'key', detail: error instanceof GeminiError ? error.detail : '' });
-    } finally { if (abort.current === controller) abort.current = null; setAsking(false); setPreview(''); }
+    } finally { if (abort.current === controller) { abort.current = null; busy.current = false; } setAsking(false); setPreview(''); }
   }
   function placeAnswer(markdown: string, next: Pending, model: string, terms: string[]) {
     const state = api.getAppState(), elements = api.getSceneElements();

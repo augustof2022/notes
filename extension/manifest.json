@@ -4,10 +4,11 @@
   "version": "1.0.0",
   "description": "Send the page you are reading to Note, then ask about it and open each term in its own thread.",
   "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
+  "host_permissions": ["https://augustof2022.github.io/notes/*"],
   "action": { "default_title": "Send this page to Note" },
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
-    "matches": ["https://augustof2022.github.io/notes/*", "http://127.0.0.1:5173/*"],
+    "matches": ["https://augustof2022.github.io/notes/*"],
     "js": ["note-bridge.js"],
     "run_at": "document_idle"
   }],

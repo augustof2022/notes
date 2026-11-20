@@ -2,7 +2,7 @@
 // button, the shortcut, or the right-click item (activeTab), keeps it in this
 // browser's extension storage, and opens Note. Nothing is sent anywhere else.
 const NOTE_URL = 'https://augustof2022.github.io/notes/';
-const NOTE_TABS = ['https://augustof2022.github.io/notes/*', 'http://127.0.0.1:5173/*'];
+const NOTE_TABS = ['https://augustof2022.github.io/notes/*'];
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: 'note-learn', title: 'Send to Note Learn', contexts: ['page', 'selection'] });
@@ -22,11 +22,10 @@ async function send(tab) {
   try { [{ result: page }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readPage }); }
   catch { return flag(tab.id, 'Chrome does not allow reading this page.'); }
   await chrome.storage.local.set({ notePage: { id: crypto.randomUUID(), page } });
-  // Prefer the published Note over a local test copy.
-  const [note] = [...await chrome.tabs.query({ url: NOTE_TABS[0] }), ...await chrome.tabs.query({ url: NOTE_TABS.slice(1) })];
+  const [note] = await chrome.tabs.query({ url: NOTE_TABS });
   if (note?.id) { await chrome.tabs.update(note.id, { active: true }); await chrome.windows.update(note.windowId, { focused: true }); }
   else await chrome.tabs.create({ url: NOTE_URL });
-  chrome.action.setBadgeText({ tabId: tab.id, text: '' });
+  chrome.action.setBadgeText({ tabId: tab.id, text: '' }); chrome.action.setTitle({ tabId: tab.id, title: 'Send this page to Note' });
 }
 
 function flag(tabId, message) {

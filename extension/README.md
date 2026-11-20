@@ -19,4 +19,5 @@ Sends the page you are reading to Note, so you can ask about it in the **Learn**
 - It reads a page only when you click it (Chrome's `activeTab` permission): the title, the address, up to 20,000 characters of visible text, and your selection.
 - The page waits in this browser's extension storage until Note confirms it arrived, then it is deleted there. It is saved on your board like any note.
 - When you ask, the page text goes to Google Gemini with your own key. Free-tier questions may be used by Google to improve its products, so do not send private or work pages.
+- It talks only to the published Note (augustof2022.github.io/notes). To test a local copy, add its address to `matches` and `host_permissions` in `manifest.json` and to `NOTE_TABS` in `background.js`, then reload the extension.
 - It cannot read `chrome://` pages, the Chrome Web Store, or PDFs opened in Chrome's viewer.

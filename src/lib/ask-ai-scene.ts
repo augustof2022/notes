@@ -75,7 +75,7 @@ export function readLearnPage(value: any): LearnPage | null {
 const learnData = (element: ExcalidrawElement | undefined): LearnData | null => element?.customData?.noteAi && typeof element.customData.noteAi === 'object' ? element.customData.noteAi as LearnData : null;
 export const learnPage = (element: ExcalidrawElement | undefined): LearnPage | null => {
   const page = element?.customData?.noteLearnPage;
-  return page && typeof page.url === 'string' && typeof page.text === 'string' ? page as LearnPage : null;
+  return page && typeof page.url === 'string' && /^https?:\/\//i.test(page.url) && typeof page.text === 'string' ? page as LearnPage : null;
 };
 export const isLearnNote = (element: ExcalidrawElement | undefined) => !!element && element.type === 'text' && !element.isDeleted && !!(learnData(element) || learnPage(element));
 const noteText = (element: ExcalidrawElement) => element.type === 'text' ? (element.originalText || element.text).trim() : '';

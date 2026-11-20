@@ -8,6 +8,8 @@ import type { LearnAsk } from './AskAiTools';
 import './learn-panel.css';
 
 interface View { id: string; elements: readonly ExcalidrawElement[] }
+/** Deliveries already placed, so a page sent twice (helper retries, board remounts) lands once. */
+const received = new Set<string>();
 
 /**
  * The Learn panel turns an AI answer into a thread you can walk: its marked
@@ -43,7 +45,8 @@ export function LearnPanel({ api, root, onMessage }: { api: ExcalidrawImperative
       if (event.source !== window || event.origin !== window.location.origin || event.data?.type !== 'note-learn-page') return;
       const page = readLearnPage(event.data.page);
       window.postMessage({ type: 'note-learn-received', id: event.data.id }, window.location.origin);
-      if (!page) return;
+      if (!page || received.has(String(event.data.id))) return;
+      received.add(String(event.data.id));
       placePage(api, page); setHidden(false);
       onMessage(`Added “${page.title}”. Ask about it in the Learn panel.`);
     };

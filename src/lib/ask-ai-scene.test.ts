@@ -50,6 +50,7 @@ it('walks a thread back to the page it started from and sends it as context', ()
   expect(context.slice(1)).toEqual(['A heat pump…', '### COP\n\nRatio…']);
   expect(isLearnNote(elements[0])).toBe(true);
   expect(isLearnNote(el({ id: 'plain', type: 'text', text: 'hi' }))).toBe(false);
+  expect(isLearnNote(el({ id: 'bad', type: 'text', text: 'x', customData: { noteLearnPage: { ...page, url: 'javascript:alert(1)' } } }))).toBe(false);
 });
 
 it('accepts only web pages from the browser helper, trimmed', () => {

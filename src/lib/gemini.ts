@@ -33,15 +33,26 @@ export function systemText(request: Pick<AskRequest, 'instruction' | 'mode'>) {
  * models take a thinking level, minimal for term look-ups and low otherwise.
  * See https://ai.google.dev/gemini-api/docs/thinking.
  */
-export function thinkingConfig(model: string, fast: boolean): Record<string, string | number> | undefined {
-  if (/2\.5-flash-lite/.test(model)) return undefined;
-  if (/2\.5/.test(model)) return fast ? { thinkingBudget: 0 } : undefined;
-  return { thinkingLevel: fast ? 'minimal' : 'low' };
-}
+type Thinking = Record<string, string | number> | undefined;
 
-export function geminiBody(request: AskRequest, search: boolean, model = '', thinking = true) {
+/**
+ * Thinking settings to try in order: the fastest first, then a setting more
+ * models accept (some newer models do not offer minimal), then none.
+ */
+export function thinkingConfigs(model: string, fast: boolean): Thinking[] {
+  if (/2\.5-flash-lite/.test(model) || /2\.5-pro/.test(model)) return [undefined];
+  if (/2\.5-flash/.test(model)) return fast ? [{ thinkingBudget: 0 }, undefined] : [undefined];
+  return fast ? [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }, undefined] : [{ thinkingLevel: 'low' }, undefined];
+}
+export const thinkingConfig = (model: string, fast: boolean) => thinkingConfigs(model, fast)[0];
+
+/** The setting each model accepted in this session, so a rejected one is not sent again. */
+const acceptedThinking = new Map<string, number>();
+export const forgetThinking = () => acceptedThinking.clear();
+
+export function geminiBody(request: AskRequest, search: boolean, model = '', step = 0) {
   const notes = request.context.filter(text => text.trim()).map(text => `Note on the board:\n${text.trim()}`);
-  const config = thinking ? thinkingConfig(model, request.mode === 'term') : undefined;
+  const config = thinkingConfigs(model, request.mode === 'term')[step];
   return {
     systemInstruction: { parts: [{ text: systemText(request) }] },
     contents: [{ role: 'user', parts: [
@@ -63,6 +74,7 @@ export function mergeStreamChunks(chunks: any[]) {
   let text = '', finishReason: string | undefined, promptFeedback: any;
   const groundingChunks: any[] = [];
   for (const chunk of chunks) {
+    if (chunk?.error) throw failure(Number(chunk.error.code) || 500, chunk);
     const candidate = chunk?.candidates?.[0];
     for (const part of candidate?.content?.parts || []) if (typeof part?.text === 'string' && !part.thought) text += part.text;
     groundingChunks.push(...(candidate?.groundingMetadata?.groundingChunks || []));
@@ -126,7 +138,8 @@ export function quotaWindow(json: any): { window: QuotaWindow; retrySeconds: num
   return { window: 'unknown', retrySeconds };
 }
 
-function failure(status: number, json: any): GeminiError {
+function failure(status: number, body: any): GeminiError {
+  const json = Array.isArray(body) ? body[0] : body;
   const message = String(json?.error?.message || ''), reason = JSON.stringify(json?.error?.details || ''), detail = message.slice(0, 600);
   if (status === 400 && /API_KEY_INVALID|API key not valid/i.test(message + reason)) return new GeminiError('Your Gemini API key was rejected. Check it in Google AI Studio, then save it again under Ask AI ⌄.', 'key', detail);
   if (status === 401 || status === 403) return new GeminiError('This Gemini API key is not allowed to use Gemini. Create a new key in Google AI Studio.', 'key', detail);
@@ -152,11 +165,11 @@ function failure(status: number, json: any): GeminiError {
  */
 export async function askGemini(apiKey: string, request: AskRequest, options: { signal?: AbortSignal; fetcher?: typeof fetch; models?: string[]; onText?: (text: string) => void } = {}): Promise<AskAnswer> {
   const fetcher = options.fetcher || fetch, onText = options.onText;
-  const send = async (model: string, search: boolean, thinking: boolean) => {
+  const send = async (model: string, search: boolean, step: number) => {
     let response: Response;
     try {
       response = await fetcher(`${ENDPOINT}/${model}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, { method: 'POST', signal: options.signal,
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(geminiBody(request, search, model, thinking)) });
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(geminiBody(request, search, model, step)) });
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') throw error;
       throw new GeminiError('Could not reach Gemini. Check your connection.', 'network');
@@ -166,17 +179,20 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
     let json: any;
     try { json = onText ? await readStream(response, onText) : await response.json().catch(() => null); }
     catch (error) {
-      if ((error as Error)?.name === 'AbortError') throw error;
+      if ((error as Error)?.name === 'AbortError' || error instanceof GeminiError) throw error;
       throw new GeminiError('The connection to Gemini dropped while it was answering. Try again.', 'network');
     }
     return { ...readGeminiAnswer(json, search), model };
   };
-  // A model that rejects the thinking setting is asked again without it.
+  // A model that rejects a thinking setting is asked again with the next one; the accepted step is remembered.
   const call = async (model: string, search: boolean) => {
-    try { return await send(model, search, true); }
-    catch (error) {
-      if (error instanceof GeminiError && (error.kind === 'other' || error.kind === 'unavailable') && /thinking/i.test(error.detail) && thinkingConfig(model, request.mode === 'term')) return send(model, search, false);
-      throw error;
+    const fast = request.mode === 'term', key = `${model}|${fast}`, last = thinkingConfigs(model, fast).length - 1;
+    for (let step = acceptedThinking.get(key) || 0; ; step++) {
+      try { const answer = await send(model, search, step); acceptedThinking.set(key, step); return answer; }
+      catch (error) {
+        if (step < last && error instanceof GeminiError && (error.kind === 'other' || error.kind === 'unavailable') && /thinking/i.test(error.detail)) continue;
+        throw error;
+      }
     }
   };
   const failures: GeminiError[] = [];
