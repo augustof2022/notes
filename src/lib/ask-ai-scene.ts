@@ -45,9 +45,9 @@ export function objectContent(elements: readonly ExcalidrawElement[], members: r
   });
   const text = words.join('\n\n').slice(0, MAX_OBJECT_TEXT);
   const images = askSelection(members, Object.fromEntries(members.map(element => [element.id, true])), files).images;
-  const drawn = members.some(element => !['text', 'image'].includes(element.type) && !elements.some(item => item.type === 'text' && !item.isDeleted && item.containerId === element.id));
-  const snapshot = !text && !images.length && drawn;
-  return { text, images, members: [...members], snapshot, kind: text ? 'text' : images.length ? 'image' : 'drawing' };
+  // Pictures Gemini cannot take as they are (SVG, GIF, very large, not loaded yet) and wordless drawings go as a PNG snapshot.
+  const snapshot = !text && !images.length && members.length > 0;
+  return { text, images, members: [...members], snapshot, kind: text ? 'text' : images.length || members.some(element => element.type === 'image') ? 'image' : 'drawing' };
 }
 
 /** Markdown for the answer note, with up to five linked sources from Google Search. */

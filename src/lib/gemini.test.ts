@@ -171,3 +171,11 @@ it('still stops at once when the person cancels', async () => {
   await expect(asking).rejects.toMatchObject({ name: 'AbortError' });
   expect((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 });
+
+it('waits as long as it takes once a try was too slow, so a slow network still gets an answer', async () => {
+  const hang = (init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+  const later = () => new Promise<Response>(resolve => setTimeout(() => resolve(new Response(JSON.stringify(answer), { status: 200 })), 60));
+  const fetcher = vi.fn((url: string, init: RequestInit) => url.includes('/gemini-flash-latest:') ? hang(init) : later()) as unknown as typeof fetch;
+  const result = await askGemini('KEY', { ...request, mode: 'explain' }, { fetcher, firstByteMs: 20 });
+  expect(result.model).toBe('gemini-2.5-flash');
+});

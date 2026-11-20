@@ -412,11 +412,14 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const aiTarget = selection.node || selection.object?.element || null;
   const showActions = (enabled || selection.object || selection.node || selection.edge?.customData?.noteDiagram?.universal) && !panel && !placing && !sourceId && chosen && !snapshot.state.editingTextElement && snapshot.state.cursorButton !== 'down';
   const learnObject = (kind: 'explain' | 'ask', question?: string) => {
-    if (!aiTarget) return;
-    root?.dispatchEvent(new CustomEvent(LEARN_EVENT, { detail: { kind, sourceId: aiTarget.id, selection: '', question, object: true } }));
+    if (!aiTarget) return false;
+    const detail = { kind, sourceId: aiTarget.id, selection: '', question, object: true, accepted: false };
+    root?.dispatchEvent(new CustomEvent(LEARN_EVENT, { detail }));
+    return detail.accepted;
   };
   const closeAsk = () => { setAskFor(null); setPrompt(''); root?.querySelector<HTMLElement>('.excalidraw')?.focus(); };
-  const sendAsk = () => { const text = prompt.trim(); if (!text) return; learnObject('ask', text); setAskFor(null); setPrompt(''); };
+  // The box stays open with the prompt if Ask AI is still busy with another answer.
+  const sendAsk = () => { const text = prompt.trim(); if (!text || !learnObject('ask', text)) return; setAskFor(null); setPrompt(''); };
   const aiButtons = <>
     <button className="note-text-ai is-primary" aria-label="Explain the selected object" title="Explain this object in a new connected note" onClick={() => learnObject('explain')}><Sparkles size={14} />Explain</button>
     <button className="note-text-ai" aria-label="Ask about the selected object" title="Ask your own question about this object" onClick={() => { setPrompt(''); setAskFor(aiTarget?.id || null); }}><MessageCircleQuestion size={14} />Ask</button>
@@ -433,7 +436,12 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const askTarget = askFor && aiTarget?.id === askFor ? aiTarget : null;
   const askWords = askTarget ? noteText(askTarget, snapshot.elements) : '';
   const askAbout = askWords ? `“${askWords.length > 60 ? `${askWords.slice(0, 59)}…` : askWords}”` : askTarget?.type === 'image' ? 'this image' : 'this drawing';
-  const askForm = askTarget && <form className={`note-text-ask diagram-object-ask${mobileActionSlot ? ' is-inline' : ''}`} style={mobileActionSlot ? undefined : actionPosition || undefined} onSubmit={event => { event.preventDefault(); sendAsk(); }}>
+  const askWidth = Math.min(380, (bounds?.width || 400) - 16), askHeight = 128;
+  const objectBottom = chosenGeometry && project([chosenGeometry.x, chosenGeometry.y + chosenGeometry.height])[1];
+  const askAbove = nodeCenter ? nodeCenter[1] - askHeight - 8 : 0, roomAbove = askAbove >= editorTop + 72;
+  const askPosition = nodeCenter && { width: askWidth, left: Math.max(8, Math.min((bounds?.width || 400) - askWidth - 8, nodeCenter[0] - askWidth / 2)),
+    top: Math.max(editorTop + 72, Math.min((bounds?.height || 600) - askHeight - 8, roomAbove ? askAbove : (objectBottom || 0) + 8)) };
+  const askForm = askTarget && <form className={`note-text-ask diagram-object-ask${mobileActionSlot ? ' is-inline' : ''}`} style={mobileActionSlot ? undefined : askPosition || undefined} onSubmit={event => { event.preventDefault(); sendAsk(); }}>
     <span className="note-text-ask-about" title={askWords || askAbout}><MessageCircleQuestion size={14} /><span>Ask about <b>{askAbout}</b></span></span>
     <div className="note-text-ask-row"><textarea aria-label="Your prompt" rows={1} maxLength={2000} value={prompt} autoFocus placeholder="Your prompt" onChange={event => { setPrompt(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(120, event.target.scrollHeight)}px`; }}
       onKeyDown={event => { event.stopPropagation(); if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendAsk(); } if (event.key === 'Escape') { event.preventDefault(); closeAsk(); } }} />

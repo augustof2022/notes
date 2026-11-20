@@ -66,4 +66,7 @@ it('reads a whole selected object: a text box or shape label as words, a picture
   expect(objectContent(elements, [photo], files)).toMatchObject({ text: '', images: [{ mimeType: 'image/png', data: 'AAAA' }], snapshot: false, kind: 'image' });
   expect(objectContent(elements, [sketch], files)).toMatchObject({ text: '', images: [], snapshot: true, kind: 'drawing' });
   expect(objectContent(elements, [note, photo], files)).toMatchObject({ text: 'PMT', images: [{ mimeType: 'image/png', data: 'AAAA' }], kind: 'text' });
+  // A picture Gemini cannot take as it is (SVG) goes as a snapshot instead of being refused.
+  const svg = el({ id: 'svg', type: 'image', fileId: 's' }), svgFiles = { s: { dataURL: 'data:image/svg+xml;base64,BBBB' } } as unknown as BinaryFiles;
+  expect(objectContent([svg], [svg], svgFiles)).toMatchObject({ images: [], snapshot: true, kind: 'image' });
 });

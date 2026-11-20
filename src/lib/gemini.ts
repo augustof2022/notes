@@ -190,11 +190,15 @@ function failure(status: number, body: any): GeminiError {
  */
 export async function askGemini(apiKey: string, request: AskRequest, options: { signal?: AbortSignal; fetcher?: typeof fetch; models?: string[]; onText?: (text: string) => void; firstByteMs?: number; now?: () => number } = {}): Promise<AskAnswer> {
   const fetcher = options.fetcher || fetch, onText = options.onText, now = options.now || Date.now, outer = options.signal;
+  // Once a try was too slow, the rest wait as long as it takes: a slow network should get an answer, not "took too long" eight times.
+  let patient = false;
   const send = async (model: string, search: boolean, step: number) => {
     // Each try has its own cancel: the person's Cancel stops it, and so does a model that has not started answering in time (often "overloaded").
     const attempt = new AbortController(), started = now(), stop = () => attempt.abort();
     let slow = false;
-    const timer = setTimeout(() => { slow = true; attempt.abort(); }, options.firstByteMs ?? FIRST_BYTE_MS);
+    const body = JSON.stringify(geminiBody(request, search, model, step));
+    // Sending pictures takes time on a slow uplink: allow 1 s per 100 KB on top of the wait for the first words.
+    const timer = patient ? undefined : setTimeout(() => { slow = true; attempt.abort(); }, (options.firstByteMs ?? FIRST_BYTE_MS) + Math.round(body.length / 100));
     const first = () => clearTimeout(timer);
     if (outer?.aborted) attempt.abort(); else outer?.addEventListener('abort', stop);
     const late = () => { trace(model, search, 'no words in time', started, now); return new GeminiError('Gemini took too long to start answering.', 'slow'); };
@@ -202,7 +206,7 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
       let response: Response;
       try {
         response = await fetcher(`${ENDPOINT}/${model}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, { method: 'POST', signal: attempt.signal,
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(geminiBody(request, search, model, step)) });
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, body });
       } catch (error) {
         if (slow) throw late();
         if ((error as Error)?.name === 'AbortError') throw error;
@@ -244,6 +248,7 @@ export async function askGemini(apiKey: string, request: AskRequest, options: { 
     catch (error) {
       if (!(error instanceof GeminiError) || !['quota', 'unavailable', 'other', 'slow'].includes(error.kind)) throw error;
       cooling.set(routeKey(model, search), now() + coolMs(error));
+      if (error.kind === 'slow') patient = true;
       failures.push(error);
     }
   }

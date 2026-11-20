@@ -6,7 +6,7 @@ import type { DiagramEdgeSettings, DiagramStyle } from './diagram-scene';
  * with `object`, the whole selected object: a text box, shape, picture or
  * drawing), and the person's own prompt for Ask.
  */
-export interface LearnSelection { kind: 'explain' | 'ask'; sourceId: string; selection: string; question?: string; object?: boolean }
+export interface LearnSelection { kind: 'explain' | 'ask'; sourceId: string; selection: string; question?: string; object?: boolean; /** Set by Ask AI when it takes the request (it refuses while another answer is running). */ accepted?: boolean }
 
 /** Dispatched on the board by the text editor's Explain and Ask buttons; Ask AI answers it. */
 export const LEARN_EVENT = 'note-learn-ask';

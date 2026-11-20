@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucide-react';
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
-import { askGemini, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
+import { askGemini, forgetRoutes, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
 import { answerMarkdown, askSelection, isLearnNote, learnPage, noteText, objectContent, threadContext, type LearnData } from '../lib/ask-ai-scene';
 import type { AskImage } from '../lib/gemini';
 import { cleanSelection, LEARN_EDGE, LEARN_EVENT, LEARN_NODE, LEARN_SOURCE_LINE, learnBase, learnEdgeStyle, learnQuestion, placeRightOf, selectionNodeSize, selectionNodeText, type LearnSelection } from '../lib/explain-scene';
@@ -33,17 +33,17 @@ export { LEARN_EVENT };
 export function AskAiTools({ api, root, client, owner, onMessage }: { api: ExcalidrawImperativeAPI; root: HTMLElement | null; client: SupabaseClient | null; owner: string; onMessage: (message: string) => void }) {
   const [host, setHost] = useState<Element | null>(null), [dialog, setDialog] = useState<Dialog>(null), [asking, setAsking] = useState(false), [preview, setPreview] = useState('');
   const [sealed, setSealed] = useState<SealedAiKey | null | undefined>(undefined);
-  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null), busy = useRef(false);
+  const apiKey = useRef<string | null>(null), pending = useRef<Pending | null>(null), abort = useRef<AbortController | null>(null), busy = useRef(false), mounted = useRef(true);
   const signedIn = !!client && owner !== 'local';
   useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
-    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnSelection>).detail; if (!detail?.sourceId || (!detail.object && !cleanSelection(detail.selection || '')) || (detail.kind === 'ask' && !detail.question?.trim())) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(() => learnRequest(detail)); };
+    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnSelection>).detail; if (!detail?.sourceId || (!detail.object && !cleanSelection(detail.selection || '')) || (detail.kind === 'ask' && !detail.question?.trim())) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } detail.accepted = true; void proceed(() => learnRequest(detail)); };
     root?.addEventListener('note-ask-ai', request); root?.addEventListener(LEARN_EVENT, learn);
     return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener(LEARN_EVENT, learn); };
   }, [root, client, owner]);
   // Leaving the board (or closing it) stops the answer: it has nowhere to land. Switching browser tabs does not.
-  useEffect(() => () => { if (abort.current) { abort.current.abort(); onMessage('Ask AI stopped because you left the board. Ask again there.'); } }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (abort.current || busy.current) { abort.current?.abort(); onMessage('Ask AI stopped because you left the board. Ask again there.'); } }; }, []);
 
   async function currentSealed() {
     if (!signedIn) return null;
@@ -114,13 +114,20 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   async function proceed(next: Pending | (() => Promise<Pending | null>)) {
     if (busy.current) return;
     busy.current = true;
-    try { const ready = typeof next === 'function' ? await next() : next; if (ready) await prepare(ready); } finally { if (!abort.current) busy.current = false; }
+    if (typeof next === 'function') setAsking(true);
+    try {
+      const ready = typeof next === 'function' ? await next() : next;
+      if (ready && mounted.current) await prepare(ready);
+    } catch (error) {
+      if (mounted.current) setDialog({ mode: 'error', message: error instanceof Error ? error.message : 'Could not prepare the question.' });
+    } finally { if (!abort.current) { busy.current = false; if (mounted.current) setAsking(false); } }
   }
   async function prepare(next: Pending) {
     pending.current = next;
     if (!signedIn) { setDialog({ mode: 'error', message: 'Ask AI needs a signed-in Google account so your encrypted key can be saved. You can still use Ask Google.' }); return; }
     let key: Awaited<ReturnType<typeof readyKey>>;
     try { key = await readyKey(); } catch (error) { setDialog({ mode: 'error', message: error instanceof Error ? error.message : 'Could not load your Ask AI key.' }); return; }
+    if (!mounted.current) return;
     if (key === 'setup' || key === 'unlock') { setDialog({ mode: key }); return; }
     await run(key, next);
   }
@@ -213,7 +220,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     setDialog(null);
   }
   async function keyReady(key: string, lock: CryptoKey, value: SealedAiKey, remember: boolean) {
-    apiKey.current = key; setSealed(value);
+    apiKey.current = key; setSealed(value); forgetRoutes();
     if (remember) await rememberAiKeyLock(owner, { lock, salt: value.salt }); else await forgetAiKeyLock(owner);
     const next = pending.current;
     if (next?.request.question.trim()) await run(key, next); else setDialog(null);
@@ -232,7 +239,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
       onSetup={async (key, passphrase, remember) => { if (await verifyGeminiKey(key) === 'offline') onMessage('Could not reach Google to check the key; saved it anyway.'); const { sealed: value, lock } = await sealAiKey(key, passphrase); await saveSealedAiKey(client!, value); await keyReady(key.trim(), lock, value, remember); }}
       onUnlock={async (passphrase, remember) => { const value = sealed || await currentSealed(); if (!value) { setDialog({ mode: 'setup' }); return; } const { apiKey: key, lock } = await unlockAiKey(value, passphrase); await keyReady(key, lock, value, remember); }}
       onForget={async () => { apiKey.current = null; await forgetAiKeyLock(owner); setDialog(null); onMessage('Ask AI is locked on this device. Your encrypted key stays in your account.'); }}
-      onRemove={async () => { apiKey.current = null; await forgetAiKeyLock(owner); await deleteSealedAiKey(client!, owner); setSealed(null); setDialog(null); onMessage('Your Gemini key was removed from your account.'); }} />, document.body)}
+      onRemove={async () => { apiKey.current = null; forgetRoutes(); await forgetAiKeyLock(owner); await deleteSealedAiKey(client!, owner); setSealed(null); setDialog(null); onMessage('Your Gemini key was removed from your account.'); }} />, document.body)}
   </>;
 }
 
