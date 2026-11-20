@@ -15,7 +15,8 @@ it('writes the selection node and the prompt for Explain and Ask', () => {
   expect(selectionNodeText('proxy means test')).toBe('“proxy means test”');
   expect(selectionNodeText('proxy means test', ' how is it scored? ')).toBe('“proxy means test”\nQ: how is it scored?');
   expect(learnQuestion({ kind: 'explain', selection: 'PMT' })).toBe('Explain “PMT”, in the sense it has in my note.');
-  expect(learnQuestion({ kind: 'ask', selection: 'PMT', question: 'Who uses it? ' })).toBe('My question: Who uses it?\n\n(It is about these words I selected in my note: “PMT”.)');
+  expect(learnQuestion({ kind: 'ask', selection: 'PMT', question: 'Who uses it? ' })).toBe('Who uses it?');
+  expect(learnQuestion({ kind: 'explain', selection: '' })).toBe('Explain this.');
 });
 
 it('sizes the chip to its words, wrapping long ones at base x 14', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CaptureUpdateAction, convertToExcalidrawElements, mutateElement, newElementWith } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, convertToExcalidrawElements, exportToBlob, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement, ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -8,7 +8,8 @@ import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucid
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
 import { askGemini, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
-import { answerMarkdown, askSelection, isLearnNote, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { answerMarkdown, askSelection, isLearnNote, learnPage, noteText, objectContent, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import type { AskImage } from '../lib/gemini';
 import { cleanSelection, LEARN_EDGE, LEARN_EVENT, LEARN_NODE, LEARN_SOURCE_LINE, learnBase, learnEdgeStyle, learnQuestion, placeRightOf, selectionNodeSize, selectionNodeText, type LearnSelection } from '../lib/explain-scene';
 import { connectionTarget } from '../lib/connection-targets';
 import { attachDiagramEdge, createObjectConnection } from '../lib/diagram-scene';
@@ -20,7 +21,7 @@ import './ask-ai.css';
 
 type Dialog = { mode: 'setup' | 'unlock' | 'manage' | 'ask'; message?: string } | { mode: 'error'; message: string; key?: boolean; detail?: string } | null;
 /** For Explain/Ask on selected words: the selection, and the node made for it once the key is ready. */
-interface Pending { request: AskRequest; anchorId: string | null; parentId?: string; learn?: LearnSelection & { nodeId?: string; added?: string[] } }
+interface Pending { request: AskRequest; anchorId: string | null; parentId?: string; learn?: LearnSelection & { nodeId?: string; added?: string[]; chip?: string } }
 export { LEARN_EVENT };
 
 /**
@@ -37,11 +38,12 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   useLayoutEffect(() => { setHost(root?.closest('.main-content')?.querySelector('.board-header-tools') || null); }, [root]);
   useEffect(() => {
     const request = () => { void start(); };
-    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnSelection>).detail; if (!detail?.sourceId || !cleanSelection(detail.selection || '') || (detail.kind === 'ask' && !detail.question?.trim())) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(learnRequest(detail)); };
+    const learn = (event: Event) => { const detail = (event as CustomEvent<LearnSelection>).detail; if (!detail?.sourceId || (!detail.object && !cleanSelection(detail.selection || '')) || (detail.kind === 'ask' && !detail.question?.trim())) return; if (busy.current) { onMessage('Gemini is still answering. Ask again when it is done.'); return; } void proceed(() => learnRequest(detail)); };
     root?.addEventListener('note-ask-ai', request); root?.addEventListener(LEARN_EVENT, learn);
     return () => { root?.removeEventListener('note-ask-ai', request); root?.removeEventListener(LEARN_EVENT, learn); };
   }, [root, client, owner]);
-  useEffect(() => () => abort.current?.abort(), []);
+  // Leaving the board (or closing it) stops the answer: it has nowhere to land. Switching browser tabs does not.
+  useEffect(() => () => { if (abort.current) { abort.current.abort(); onMessage('Ask AI stopped because you left the board. Ask again there.'); } }, []);
 
   async function currentSealed() {
     if (!signedIn) return null;
@@ -63,17 +65,44 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const texts = question ? [...picked.texts, question] : picked.texts;
     if (picked.skippedImages) onMessage(`${picked.skippedImages} selected image${picked.skippedImages === 1 ? ' was' : 's were'} not sent (only PNG, JPEG, or WebP up to about 4 MB, three at most).`);
     const anchor = picked.anchor && isLearnNote(picked.anchor) ? picked.anchor.id : undefined;
-    return { request: { question: texts.at(-1) || '', context: texts.slice(0, -1), images: picked.images, instruction: readAiInstruction() }, anchorId: picked.anchor?.id || null, parentId: anchor };
+    return { request: { question: texts.at(-1) || '', context: texts.slice(0, -1), images: picked.images, mode: 'ask' }, anchorId: picked.anchor?.id || null, parentId: anchor };
   }
   /**
    * Explain/Ask on selected words: the note (and the thread it belongs to,
    * back to a sent page) is the context, so the words are explained in the
-   * sense they have there.
+   * sense they have there. With `object`, the whole selected object is what
+   * it is about: its words, its picture, or a snapshot of a drawing. Ask is
+   * clean (no instruction); the saved instruction is for Explain only.
    */
-  function learnRequest(ask: LearnSelection): Pending {
-    const elements = api.getSceneElements(), sourceId = connectionTarget(elements, ask.sourceId)?.element.id || ask.sourceId;
-    const learn = { ...ask, sourceId, selection: cleanSelection(ask.selection), question: ask.question?.trim() };
-    return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction: readAiInstruction(), mode: ask.kind, focus: learn.selection }, anchorId: sourceId, parentId: sourceId, learn };
+  async function learnRequest(ask: LearnSelection): Promise<Pending | null> {
+    const elements = api.getSceneElements(), target = connectionTarget(elements, ask.sourceId), sourceId = target?.element.id || ask.sourceId;
+    const question = ask.question?.trim(), instruction = ask.kind === 'explain' ? readAiInstruction() : undefined;
+    if (!ask.object) {
+      const learn = { ...ask, sourceId, selection: cleanSelection(ask.selection), question };
+      return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction, mode: ask.kind, focus: learn.selection }, anchorId: sourceId, parentId: sourceId, learn };
+    }
+    if (!target) return null;
+    const groupId = target.groupId;
+    const members = groupId ? elements.filter(element => !element.isDeleted && element.groupIds?.includes(groupId) && !(element.type === 'text' && element.containerId) && !element.customData?.noteRichTextRender) : [target.element];
+    const content = objectContent(elements, members, api.getFiles());
+    const images = content.snapshot ? await snapshot(members) : content.images;
+    if (!content.text && !images.length) { onMessage('This object has no words or picture to send.'); return null; }
+    // The object's own words are what it is about, so they are not repeated as context.
+    const context = threadContext(elements, sourceId);
+    if (!learnPage(target.element) && context.at(-1) === noteText(target.element, elements).slice(0, 1500)) context.pop();
+    const chip = content.text ? undefined : content.kind === 'image' ? 'Picture' : 'Drawing';
+    const learn = { ...ask, sourceId, selection: content.text, question, chip };
+    return { request: { question: learnQuestion(learn), context, images, instruction, mode: ask.kind, focus: content.text, picture: !content.text }, anchorId: sourceId, parentId: sourceId, learn };
+  }
+  /** A picture of a drawing or wordless shape, for Gemini to look at (white background, at most 1600 px). */
+  async function snapshot(members: readonly ExcalidrawElement[]): Promise<AskImage[]> {
+    try {
+      const blob = await exportToBlob({ elements: members, files: api.getFiles(), mimeType: 'image/png', maxWidthOrHeight: 1600, exportPadding: 16,
+        appState: { exportBackground: true, viewBackgroundColor: '#ffffff', exportWithDarkMode: false } });
+      const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
+      const match = /^data:([^;,]+);base64,(.*)$/.exec(data);
+      return match ? [{ mimeType: match[1], data: match[2] }] : [];
+    } catch { return []; }
   }
   async function start() {
     if (busy.current) return;
@@ -82,10 +111,10 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     await proceed(next);
   }
   /** One question at a time: busy covers loading the key as well as the answer. */
-  async function proceed(next: Pending) {
+  async function proceed(next: Pending | (() => Promise<Pending | null>)) {
     if (busy.current) return;
     busy.current = true;
-    try { await prepare(next); } finally { if (!abort.current) busy.current = false; }
+    try { const ready = typeof next === 'function' ? await next() : next; if (ready) await prepare(ready); } finally { if (!abort.current) busy.current = false; }
   }
   async function prepare(next: Pending) {
     pending.current = next;
@@ -133,7 +162,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     if (!source) return null;
     const label = (source.element.type === 'text' ? source.element : elements.find(item => item.type === 'text' && item.containerId === source.element.id)) as ExcalidrawTextElement | undefined;
     const base = learnBase({ fontSize: label?.fontSize, customData: source.element.customData }), k = base / 20;
-    const text = selectionNodeText(learn.selection, learn.kind === 'ask' ? learn.question : undefined);
+    const text = selectionNodeText(learn.selection, learn.kind === 'ask' ? learn.question : undefined, learn.chip);
     const size = selectionNodeSize(text, base), place = placeRightOf(source.geometry, size, elements, LEARN_NODE.gapSource * k, LEARN_NODE.gapStack * k);
     const created = convertToExcalidrawElements([{ type: 'rectangle', ...place, ...size, strokeColor: LEARN_NODE.stroke, backgroundColor: LEARN_NODE.fill, fillStyle: 'solid', strokeWidth: LEARN_NODE.chipStrokeWidth,
       roughness: 0, roundness: LEARN_NODE.roundness, customData: { noteAi: { question: text.slice(0, 500), at: new Date().toISOString(), parentId: source.element.id, role: 'selection', kind: learn.kind, selection: learn.selection, base } satisfies LearnData },
@@ -214,13 +243,13 @@ function learnData(next: Pending, model: string): LearnData {
   return { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(), ...(next.parentId ? { parentId: next.parentId } : {}) };
 }
 
-/** The standing instruction, sent with every question; kept in this browser. */
+/** The standing instruction, sent with every Explain (Ask is clean); kept in this browser. */
 function InstructionField() {
   // Saved as you type, so closing the dialog can never lose it.
   const [text, setText] = useState(readAiInstruction);
   const change = (value: string) => { setText(value); saveAiInstruction(value); };
   return <div className="ask-ai-instruction">
-    <label>Default instruction<small>Sent first with every question, Explain and Ask, and followed over the app's own defaults. Saved in this browser as you type.</small>
+    <label>Explain instruction<small>Sent with every Explain and followed over the app's own defaults. Ask sends no instruction: only what you selected and your prompt. Saved in this browser as you type.</small>
       <textarea rows={4} maxLength={2000} value={text} placeholder="For example: explain like Feynman, plain words, one everyday picture." onChange={event => change(event.target.value)} /></label>
     {!text.trim() && <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => change(FEYNMAN_INSTRUCTION)}>Use Feynman style</button></div>}
   </div>;

@@ -1,5 +1,8 @@
-import { expect, it, vi } from 'vitest';
-import { askGemini, geminiBody, GeminiError, googleAiModeUrl, forgetThinking, mergeStreamChunks, sseChunks, systemText, thinkingConfig, verifyGeminiKey } from './gemini';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { askGemini, geminiBody, GeminiError, googleAiModeUrl, forgetRoutes, forgetThinking, mergeStreamChunks, routeOrder, sseChunks, systemText, thinkingConfig, verifyGeminiKey } from './gemini';
+
+// Routes that failed rest between questions; each test starts fresh.
+beforeEach(() => forgetRoutes());
 
 const reply = (status: number, body: object) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
 const answer = { candidates: [{ content: { parts: [{ text: 'A **heat pump**.' }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/a', title: 'Example' } }, { web: { uri: 'https://example.com/a', title: 'Dup' } }, { web: { uri: 'javascript:alert(1)', title: 'Bad' } }] } }] };
@@ -13,7 +16,7 @@ it('sends the key in a header, the notes and pictures as parts, and asks with Go
   expect(init.headers['x-goog-api-key']).toBe('KEY123');
   expect(JSON.parse(init.body).tools).toEqual([{ google_search: {} }]);
   expect(result).toEqual({ text: 'A **heat pump**.', sources: [{ title: 'Example', url: 'https://example.com/a' }], searched: true, model: 'gemini-flash-latest' });
-  expect(geminiBody(request, false).contents[0].parts).toEqual([{ inline_data: { mime_type: 'image/png', data: 'AAAA' } }, { text: 'Note on the board:\nAircon splittype' }, { text: 'What is this?' }]);
+  expect(geminiBody(request, false).contents[0].parts).toEqual([{ inline_data: { mime_type: 'image/png', data: 'AAAA' } }, { text: 'Context:\nAircon splittype' }, { text: 'What is this?' }]);
 });
 
 it('still answers without search when the search allowance is used up', async () => {
@@ -85,8 +88,10 @@ it('turns thinking down: off or minimal for terms, low otherwise, untouched wher
   expect(thinkingConfig('gemini-2.5-flash-lite', true)).toBeUndefined();
   expect(thinkingConfig('gemini-flash-latest', true)).toEqual({ thinkingLevel: 'minimal' });
   expect(thinkingConfig('gemini-flash-latest', false)).toEqual({ thinkingLevel: 'low' });
-  expect(geminiBody(request, false, 'gemini-flash-latest').generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'low' } });
-  expect(geminiBody(request, false, 'gemini-flash-latest', 1).generationConfig).toBeUndefined();
+  // Explain and Ask both ask for the fastest setting first.
+  expect(geminiBody(request, false, 'gemini-flash-latest').generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'minimal' } });
+  expect(geminiBody({ ...request, mode: 'explain' }, false, 'gemini-flash-latest').generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'minimal' } });
+  expect(geminiBody(request, false, 'gemini-flash-latest', 2).generationConfig).toBeUndefined();
   expect(thinkingConfig('gemini-2.5-pro', true)).toBeUndefined();
 });
 
@@ -118,11 +123,51 @@ it('explains selected words without search, with the person’s instruction firs
   expect(system).toContain('never changes WHAT to answer');
   expect(system).toContain('Memory hook (made up):');
   expect(system).not.toContain('[[');
-  expect(systemText({})).not.toContain('Memory hook');
-  const ask = systemText({ mode: 'ask', focus: 'PMT', instruction: 'Explain like Feynman.' });
-  expect(ask).toContain('Answer that question directly');
-  expect(ask).not.toContain('Memory hook');
-  expect(systemText({ mode: 'ask' })).not.toContain('Answer that question directly');
+  const picture = systemText({ picture: true });
+  expect(picture).toContain('picture or drawing');
+  expect(picture).not.toContain('Origin:');
   expect(systemText({}).startsWith('You answer questions')).toBe(true);
   expect(systemText({ instruction: 'x'.repeat(3000) }).length).toBeLessThan(3000);
+});
+
+it('sends Ask clean: no system instruction, only the context, what was selected, and the prompt as typed', async () => {
+  const fetcher = vi.fn(() => reply(200, answer)) as unknown as typeof fetch;
+  await askGemini('KEY', { question: 'Who uses it?', context: ['A note about 4Ps'], images: [], mode: 'ask', focus: 'PMT', instruction: 'Explain like Feynman.' }, { fetcher });
+  const body = JSON.parse((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+  expect(body.systemInstruction).toBeUndefined();
+  expect(body.contents[0].parts).toEqual([{ text: 'Context:\nA note about 4Ps' }, { text: 'Selected:\nPMT' }, { text: 'Who uses it?' }]);
+  expect(JSON.stringify(body)).not.toContain('Feynman');
+  expect(body.tools).toEqual([{ google_search: {} }]);
+});
+
+it('remembers a route that hit its limit, so the next question goes straight to one that answers', async () => {
+  let clock = 1000;
+  const perMinute = { error: { code: 429, message: 'Quota exceeded. PerMinute', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }] } };
+  const fetcher = vi.fn((url: string) => url.includes('/gemini-flash-latest:') ? reply(429, perMinute) : reply(200, answer)) as unknown as typeof fetch;
+  const calls = () => (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+  expect(await askGemini('KEY', request, { fetcher, now: () => clock })).toMatchObject({ model: 'gemini-2.5-flash', searched: true });
+  expect(calls()).toBe(3);
+  await askGemini('KEY', request, { fetcher, now: () => clock });
+  expect(calls()).toBe(4);
+  // After the wait Google asked for, the first model gets its turn again (behind the last one that answered).
+  clock += 31_000;
+  expect(routeOrder(['gemini-flash-latest', 'gemini-2.5-flash'], [true, false], clock)[0]).toEqual(['gemini-2.5-flash', true]);
+  expect(routeOrder(['gemini-flash-latest', 'gemini-2.5-flash'], [true, false], clock)).toHaveLength(4);
+});
+
+it('moves to the next model when one sends no words in time', async () => {
+  const fetcher = vi.fn((url: string, init: RequestInit) => url.includes('/gemini-flash-latest:')
+    ? new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))))
+    : reply(200, answer)) as unknown as typeof fetch;
+  const result = await askGemini('KEY', { ...request, mode: 'explain' }, { fetcher, firstByteMs: 20 });
+  expect(result.model).toBe('gemini-2.5-flash');
+});
+
+it('still stops at once when the person cancels', async () => {
+  const controller = new AbortController();
+  const fetcher = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))))) as unknown as typeof fetch;
+  const asking = askGemini('KEY', request, { fetcher, signal: controller.signal, firstByteMs: 10_000 });
+  controller.abort();
+  await expect(asking).rejects.toMatchObject({ name: 'AbortError' });
+  expect((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 });

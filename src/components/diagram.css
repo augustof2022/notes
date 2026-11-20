@@ -460,3 +460,11 @@
 .excalidraw .diagram-inline-actions button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:11px;touch-action:manipulation}
 .excalidraw .diagram-inline-actions button:hover{background:var(--accent-light);color:var(--accent)}
 .board-canvas:has(.excalidraw--mobile .App-mobile-menu)>.diagram-quick-actions{display:none}
+/* Explain and Ask on a selected object (ui-designer spec, 2026-11-20): same look as the text-selection bar. */
+.diagram-quick-actions .note-text-ai{font-size:12px;font-weight:550}
+.diagram-quick-actions .note-text-ai.is-primary,.excalidraw .diagram-inline-actions .note-text-ai.is-primary{background:var(--accent-light);color:var(--accent)}
+.diagram-quick-actions .note-text-ai-divider{flex:none;width:1px;align-self:stretch;margin:5px 2px;background:var(--line)}
+.diagram-node-quick-actions .note-text-ai-divider,.excalidraw .diagram-inline-actions .note-text-ai-divider{grid-column:1/-1;width:auto;height:1px;margin:0;background:var(--line)}
+.excalidraw .diagram-inline-actions .diagram-span{grid-column:1/-1}
+.note-text-ask.diagram-object-ask{position:absolute;z-index:7}
+.note-text-ask.diagram-object-ask.is-inline{position:static;width:100%;margin-bottom:12px;box-shadow:none}

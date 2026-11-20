@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { BinaryFiles } from '@excalidraw/excalidraw/types';
-import { answerMarkdown, askSelection, isLearnNote, readLearnPage, threadContext, threadPath } from './ask-ai-scene';
+import { answerMarkdown, askSelection, isLearnNote, objectContent, readLearnPage, threadContext, threadPath } from './ask-ai-scene';
 
 const el = (patch: object) => ({ isDeleted: false, x: 0, y: 0, width: 10, height: 10, customData: {}, ...patch }) as unknown as ExcalidrawElement;
 
@@ -55,4 +55,15 @@ it('accepts only web pages from the browser helper, trimmed', () => {
   expect(page).toMatchObject({ title: 'A page', url: 'https://example.com/a', selection: 'bit' });
   expect(page?.text.length).toBe(20000);
   expect(readLearnPage({ url: 'https://example.com/b', text: '' })?.title).toBe('example.com');
+});
+
+it('reads a whole selected object: a text box or shape label as words, a picture as is, a wordless drawing as a snapshot', () => {
+  const box = el({ id: 'box', type: 'rectangle' }), label = el({ id: 'label', type: 'text', text: 'Grievance flow', originalText: 'Grievance flow', containerId: 'box' });
+  const note = el({ id: 'note', type: 'text', text: 'PMT', originalText: 'PMT' }), photo = el({ id: 'photo', type: 'image', fileId: 'f' }), sketch = el({ id: 'sketch', type: 'freedraw' });
+  const elements = [box, label, note, photo, sketch], files = { f: { dataURL: 'data:image/png;base64,AAAA' } } as unknown as BinaryFiles;
+  expect(objectContent(elements, [box], files)).toMatchObject({ text: 'Grievance flow', images: [], snapshot: false, kind: 'text' });
+  expect(objectContent(elements, [note], files)).toMatchObject({ text: 'PMT', kind: 'text' });
+  expect(objectContent(elements, [photo], files)).toMatchObject({ text: '', images: [{ mimeType: 'image/png', data: 'AAAA' }], snapshot: false, kind: 'image' });
+  expect(objectContent(elements, [sketch], files)).toMatchObject({ text: '', images: [], snapshot: true, kind: 'drawing' });
+  expect(objectContent(elements, [note, photo], files)).toMatchObject({ text: 'PMT', images: [{ mimeType: 'image/png', data: 'AAAA' }], kind: 'text' });
 });
