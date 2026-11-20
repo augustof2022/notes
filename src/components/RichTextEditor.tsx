@@ -32,7 +32,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   const [active, setActive] = useState(0), activeRef = useRef(0);
   const [menuPosition, setMenuPosition] = useState<Popup>({ left: 8, top: 8 }), [barPosition, setBarPosition] = useState<Popup | null>(null);
   const [link, setLink] = useState<string | null>(null), linkRef = useRef<string | null>(null), [linkError, setLinkError] = useState('');
-  const [ask, setAsk] = useState<string | null>(null), asked = useRef('');
+  const [ask, setAsk] = useState<string | null>(null), asked = useRef(''), askAnchor = useRef<{ left: number; top: number; bottom: number } | null>(null);
   const [, refresh] = useState(0);
   const panPending = useRef(false);
   const latest = useRef({ onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk, onLearn }); latest.current = { onApply, onDraft, onHeight, onCaretPan, boardBounds, undoCreation, onUndoCreation, onJotIndent, jot, onAsk, onLearn };
@@ -162,11 +162,17 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
   /** The selected words, as plain text. */
   function selectedText() { const current = editorRef.current; if (!current) return ''; const { from, to } = current.state.selection; return current.state.doc.textBetween(from, to, ' ', ' ').trim(); }
   function explain() { const words = selectedText(); if (!words) return; finish(undefined, false); latest.current.onLearn?.('explain', words); }
-  function startAsk() { asked.current = selectedText(); if (asked.current) setAsk(''); }
+  function startAsk() {
+    const current = editorRef.current; asked.current = selectedText(); if (!current || !asked.current) return;
+    // Remember where the words are, so the taller Ask box sits above them and does not jump if the selection collapses.
+    const { from, to } = current.state.selection, start = current.view.coordsAtPos(from), end = current.view.coordsAtPos(to);
+    askAnchor.current = { left: Math.min(start.left, end.left), top: Math.min(start.top, end.top), bottom: Math.max(start.bottom, end.bottom) };
+    setAsk('');
+  }
   function sendAsk() { const question = (ask || '').trim(); if (!question || !asked.current) return; setAsk(null); finish(undefined, false); latest.current.onLearn?.('ask', asked.current, question); }
   /** Laptop: where the bar was. Phone: docked just above the on-screen keyboard. */
   function askPosition(): CSSProperties {
-    if (!coarsePointer()) return barPosition || menuPosition;
+    if (!coarsePointer()) return askAnchor.current ? textPopupPosition(askAnchor.current, { width: Math.min(380, viewport().width - 16), height: 112 }, viewport(), true) : barPosition || menuPosition;
     const screen = viewport();
     return { left: screen.left + 8, width: screen.width - 16, top: screen.top + screen.height - 8, transform: 'translateY(-100%)' };
   }
@@ -203,7 +209,7 @@ export function RichTextEditor({ doc, fontSize, color, opacity, textAlign, diagr
     {ask !== null && <form className="note-text-ask" style={askPosition()} onSubmit={event => { event.preventDefault(); sendAsk(); }}>
       <span className="note-text-ask-about" title={asked.current}><MessageCircleQuestion size={14} /><span>Ask about <b>“{asked.current.length > 60 ? `${asked.current.slice(0, 59)}…` : asked.current}”</b></span></span>
       <div className="note-text-ask-row"><textarea aria-label="Your question" rows={1} maxLength={500} value={ask} autoFocus placeholder="Your question" onChange={event => { setAsk(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(120, event.target.scrollHeight)}px`; }}
-        onKeyDown={event => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendAsk(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setAsk(null); editorRef.current?.view.focus(); } }} />
+        onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendAsk(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setAsk(null); editorRef.current?.view.focus(); } }} />
         <button className="note-text-ask-send" aria-label="Send question" type="submit" disabled={!ask.trim()}><ArrowUp size={16} /></button><button aria-label="Cancel" type="button" onClick={() => { setAsk(null); editorRef.current?.view.focus(); }}><X size={16} /></button></div>
       <small>Enter to send · Shift+Enter for a new line · Esc to cancel</small>
     </form>}

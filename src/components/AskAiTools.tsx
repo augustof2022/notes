@@ -139,7 +139,8 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
       roughness: 0, roundness: LEARN_NODE.roundness, customData: { noteAi: { question: text.slice(0, 500), at: new Date().toISOString(), parentId: source.element.id, role: 'selection', kind: learn.kind, selection: learn.selection, base } satisfies LearnData },
       label: { text, fontSize: base, fontFamily: label?.fontFamily || state.currentItemFontFamily, strokeColor: LEARN_NODE.text, textAlign: 'left', verticalAlign: 'middle' } }]);
     const node = created.find(element => element.type === 'rectangle')!;
-    learn.added = [...created, ...link(source.element.id, node.id, created, LEARN_SOURCE_LINE)].map(element => element.id);
+    // EVENTUALLY folds the chip into the answer's undo step: one Ctrl+Z removes the whole branch.
+    learn.added = [...created, ...link(source.element.id, node.id, created, LEARN_SOURCE_LINE, CaptureUpdateAction.EVENTUALLY)].map(element => element.id);
     requestAnimationFrame(() => api.scrollToContent(node, { fitToContent: false, animate: true }));
     return node.id;
   }
@@ -153,25 +154,30 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const doc = clipboardRichDoc(markdown, false), wrap = Math.round(fontSize * LEARN_NODE.answerChars);
     const [created] = convertToExcalidrawElements([{ type: 'text', text: richDocText(doc), x: 0, y: 0, fontSize, fontFamily: label?.fontFamily || state.currentItemFontFamily }]);
     const text = { ...created, width: wrap, customData: { noteAi: { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(), role: 'answer', kind: learn.kind, base, ...(from ? { parentId: from.element.id } : {}) } satisfies LearnData } } as ExcalidrawTextElement;
-    applyRichText(text, doc, label?.strokeColor || state.currentItemStrokeColor, true, { wrap, width: wrap, fontSize });
+    const ink = (label && readRichText(label)?.color) || (label && label.strokeColor !== 'transparent' ? label.strokeColor : '') || state.currentItemStrokeColor;
+    applyRichText(text, doc, ink, true, { wrap, width: wrap, fontSize });
     const place = from ? placeRightOf(from.geometry, { width: text.width, height: text.height }, elements, LEARN_NODE.gapAnswer * k, LEARN_NODE.gapStack * k) : { x: state.width / 2 / state.zoom.value - state.scrollX - 200, y: state.height / 2 / state.zoom.value - state.scrollY - 40 };
     mutateElement(text, place, false);
-    if (from) link(from.element.id, text.id, [text], LEARN_EDGE); else api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    if (from) link(from.element.id, text.id, [text], LEARN_EDGE, CaptureUpdateAction.IMMEDIATELY); else api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     api.updateScene({ appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
     requestAnimationFrame(() => api.scrollToContent(text, { fitToContent: false, animate: true }));
   }
   /** Add new elements with a line from `fromId` to `toId` that follows both when they move; returns the line. */
-  function link(fromId: string, toId: string, added: readonly ExcalidrawElement[], settings: typeof LEARN_EDGE): ExcalidrawElement[] {
-    const all = [...api.getSceneElements(), ...added];
+  function link(fromId: string, toId: string, added: readonly ExcalidrawElement[], settings: typeof LEARN_EDGE, capture: typeof CaptureUpdateAction[keyof typeof CaptureUpdateAction]): ExcalidrawElement[] {
+    // Work on a copy of the scene: changing live elements in place would bypass undo.
+    const all = [...structuredClone(api.getSceneElementsIncludingDeleted()) as ExcalidrawElement[], ...added];
     let edges: ExcalidrawElement[] = [];
-    try { edges = createObjectConnection(all, fromId, toId, settings, learnEdgeStyle()); attachDiagramEdge(all, edges); } catch { /* the nodes still land; only the line is missing */ }
-    api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...added, ...edges], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    try { edges = createObjectConnection(all.filter(element => !element.isDeleted), fromId, toId, settings, learnEdgeStyle()); attachDiagramEdge(all, edges); } catch { /* the nodes still land; only the line is missing */ }
+    api.updateScene({ elements: [...all, ...edges], captureUpdate: capture });
     return edges;
   }
   /** Remove elements this feature added (a branch whose answer never came). */
   function removeElements(ids: readonly string[]) {
     const gone = new Set(ids);
-    api.updateScene({ elements: api.getSceneElementsIncludingDeleted().map(element => gone.has(element.id) ? newElementWith(element, { isDeleted: true }) : element), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    const elements = api.getSceneElementsIncludingDeleted().map(element => gone.has(element.id) ? newElementWith(element, { isDeleted: true })
+      : element.boundElements?.some(bound => gone.has(bound.id)) ? newElementWith(element, { boundElements: element.boundElements.filter(bound => !gone.has(bound.id)) }) : element);
+    // NEVER: the chip's creation was not its own undo step either, so nothing to undo here.
+    api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
   }
   function askGoogle(question = pending.current?.request.question || '') {
     window.open(googleAiModeUrl(question || 'Ask anything'), '_blank', 'noopener');
