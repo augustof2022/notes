@@ -19,7 +19,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # onnxruntime-node (from @huggingface/transformers) tries to download CUDA
+      # binaries on Linux; that download now returns 404. Note runs models in the
+      # browser, so the GPU build is not needed.
+      - run: npm ci --onnxruntime-node-install-cuda=skip
       - run: npm test
       - run: npm run build
         env:
