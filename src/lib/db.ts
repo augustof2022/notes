@@ -1,11 +1,17 @@
 import Dexie, { type Table } from 'dexie';
 import type { Asset, Board, Folder, Settings } from '../types';
+
+/** A document file kept as a Blob, apart from image assets, so library queries never load its bytes. */
+export interface StoredFile { key: string; scope: string; id: string; blob: Blob }
+/** Text of each page of a document, read once on this device for search and Explain/Ask. */
+export interface StoredPdfText { key: string; scope: string; id: string; pages: string[] }
 import { recordKey } from '../types';
 import { DEFAULT_PEN_WIDTH } from './canvas-behavior';
 import { snapState } from './snapping';
 
 class NoteDB extends Dexie {
   folders!: Table<Folder, string>; boards!: Table<Board, string>; assets!: Table<Asset, string>;
+  files!: Table<StoredFile, string>; pdfText!: Table<StoredPdfText, string>;
   constructor() {
     super('note-canvas-v1');
     this.version(1).stores({ folders: '&key, scope, id, parentId', boards: '&key, scope, id, folderId', assets: '&key, scope, id' });
@@ -32,6 +38,7 @@ class NoteDB extends Dexie {
         }
       });
     });
+    this.version(4).stores({ files: '&key, scope, id', pdfText: '&key, scope, id' });
   }
 }
 export const db = new NoteDB();

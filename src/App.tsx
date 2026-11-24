@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
-import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, CircleHelp, ChevronDown, ChevronRight, Cloud, CloudOff, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, TriangleAlert, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, CircleHelp, ChevronDown, ChevronRight, Cloud, CloudOff, FileText, FileUp, Folder as FolderIcon, FolderPlus, Grid2X2, Image, Keyboard, LayoutGrid, Loader2, Menu, MoreHorizontal, Move, NotebookPen, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Settings as SettingsIcon, Sparkles, StickyNote, Trash2, TriangleAlert, X } from 'lucide-react';
 import type { Asset, Board, Folder, SearchMatch, Settings } from './types';
 import { recordKey } from './types';
 import { canMoveFolder, db, descendantFolderIds, folderPath, getSettings, loadWorkspace, newBoard, newFolder, storeSettings, touch, trashFolder, watchSettings } from './lib/db';
 import { getSupabase } from './lib/supabase';
 import { appConfig } from './config';
 import { downloadAsset, importLocalWorkspace, resolveSyncConflict, syncWorkspace } from './lib/sync';
+import { blobToDataURL } from './lib/assets';
 import { createSyncRunner, SYNC_IDLE_MS, SYNC_POLL_MS } from './lib/sync-runner';
 import { pendingSyncItems, pendingSyncLabel } from './lib/sync-status';
 import { SyncDetails } from './components/SyncDetails';
@@ -30,6 +31,10 @@ import { APP_VERSION } from './lib/version';
 import { observeNoteSession, hasGoogleIdentity, type NoteSessionState } from './lib/note-session';
 import { SignInScreen } from './components/SignInScreen';
 import { cloudFetch } from './lib/request-timeout';
+import { PdfReader } from './components/PdfReader';
+import { DocumentCard } from './components/DocumentCard';
+import { isLibraryDoc, isLibraryItem, isPdfAsset, isPlainBoard, pageBoardsOf, pageNotes, pdfDoc, pdfPageRef } from './lib/pdf-model';
+import { DOCUMENT_ACCEPT, discardEmptyPageBoard, importDocument, isDocumentFile, openPageBoard, pdfBlob, type ImportProgress } from './lib/pdf-store';
 
 type Dialog = { kind: 'folder' | 'board' | 'rename' | 'move'; record?: Board | Folder } | { kind: 'settings' | 'help' | 'search' } | null;
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -102,6 +107,11 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
   const [folderId, setFolderId] = useState<string | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [jumpId, setJumpId] = useState<string>();
+  const [readerPage, setReaderPage] = useState<{ page: number } | undefined>();
+  const [importing, setImporting] = useState('');
+  const [dropping, setDropping] = useState(false);
+  const [pdfText, setPdfText] = useState<Map<string, string[]>>(new Map());
+  const documentInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<'library' | 'trash'>('library');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -129,6 +139,12 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
   const currentBoard = workspace.boards.find(x => x.id === boardId);
+  // Documents ride on board records; page boards and board-only references stay out of the library.
+  const libraryItems = workspace.boards.filter(isLibraryItem);
+  const plainBoards = libraryItems.filter(isPlainBoard);
+  const currentDoc = pdfDoc(currentBoard) ? currentBoard : undefined;
+  const currentPageRef = pdfPageRef(currentBoard);
+  const pageParent = currentPageRef ? workspace.boards.find(x => x.id === currentPageRef.docId && !x.deleted) : undefined;
   const currentImages = currentBoard && boardImages?.boardKey === currentBoard.key ? boardImages : undefined;
   const imagesLoading = !!currentImages?.loading;
   const imageFailed = !!currentImages?.issues.length;
@@ -267,14 +283,57 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     if (activeScope.current !== scope) return;
     await onGoogle();
   }
+  /** A page board left without notes is removed, once its last save has landed (and if it is not open again). */
+  const leaving = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = leaving.current; leaving.current = currentPageRef && currentBoard ? currentBoard.key : null;
+    if (!previous || previous === currentBoard?.key) return;
+    const timer = setTimeout(() => { if (leaving.current !== previous) void discardEmptyPageBoard(previous).catch(() => {}); }, 2000);
+    return () => clearTimeout(timer);
+  }, [currentBoard?.key]);
   async function navigateFolder(id: string | null) {
     try { await flushCanvas(); setBoardId(null); setFolderId(id); setView('library'); setJumpId(undefined); setMenuFor(null); setSidebarOpen(false); }
     catch (error) { message(messageOf(error)); }
   }
-  async function openBoard(board: Board, elementId?: string) {
-    try { await flushCanvas(); setBoardId(board.id); setFolderId(board.folderId); setView('library'); setJumpId(elementId); setDialog(null); setSidebarOpen(false); setMenuFor(null); if (board.id === boardId && elementId) canvasRef.current?.jumpTo(elementId); }
+  async function openBoard(board: Board, elementId?: string, page?: number) {
+    try { await flushCanvas(); setBoardId(board.id); setFolderId(board.folderId); setView('library'); setJumpId(elementId); setReaderPage(page ? { page } : undefined); setDialog(null); setSidebarOpen(false); setMenuFor(null); if (board.id === boardId && elementId) canvasRef.current?.jumpTo(elementId); }
     catch (error) { message(messageOf(error)); }
   }
+  /** A document page's own board: opened if it exists, made (with the page in the middle) the first time. */
+  async function openDocumentPage(doc: Board, page: number) {
+    try {
+      await flushCanvas();
+      const existing = pageBoardsOf(workspace.boards, doc.id).get(page);
+      if (!existing) message(`Preparing page ${page}…`);
+      const board = await openPageBoard({ scope, docBoard: doc, page, client, existing });
+      if (!existing) setToast('');
+      setBoardId(board.id); setFolderId(doc.folderId); setJumpId(undefined); setDialog(null); setMenuFor(null);
+    } catch (error) { message(messageOf(error)); }
+  }
+  async function addDocuments(files: File[], destination = folderId) {
+    const accepted = files.filter(isDocumentFile);
+    if (!accepted.length) { message('Choose a PDF or a Word (.docx) file.'); return; }
+    let last: Board | null = null;
+    for (const file of accepted) {
+      const label = (progress: ImportProgress) => progress.stage === 'converting' ? `Converting ${file.name} to PDF…` : progress.stage === 'reading' && progress.total ? `Reading ${file.name} · page ${progress.done} of ${progress.total}` : `Adding ${file.name}…`;
+      try { setImporting(`Adding ${file.name}…`); last = await importDocument({ file, scope, folderId: destination, onProgress: progress => setImporting(label(progress)) }); }
+      catch (error) { message(`${file.name}: ${messageOf(error)}`); }
+    }
+    setImporting('');
+    if (last) { if (accepted.length === 1) void openBoard(last); else message(`${accepted.length} documents added`); void sync(false); }
+  }
+  async function downloadDocument(doc: Board) {
+    const meta = pdfDoc(doc); if (!meta) return;
+    try { const blob = await pdfBlob(client, scope, meta.fileId); download(`${doc.name}.pdf`, blob); }
+    catch (error) { message(messageOf(error)); }
+  }
+  useEffect(() => {
+    if (dialog?.kind !== 'search') return;
+    let alive = true;
+    // Page words are read from this device's index only while searching.
+    void db.pdfText.where('scope').equals(scope).toArray().then(rows => { if (alive) setPdfText(new Map(rows.map(row => [row.id, row.pages]))); });
+    return () => { alive = false; };
+  }, [dialog?.kind, scope]);
   function openSearch() { setQuery(''); setSearchFolderId(folderId); setDialog({ kind: 'search' }); }
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -299,14 +358,21 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     if ('parentId' in record) {
       if (!canMoveFolder(workspace.folders, record.id, destination)) throw new Error('Choose a folder outside this folder’s descendants.');
       await db.folders.update(record.key, { parentId: destination, ...touch() });
-    } else await db.boards.update(record.key, { folderId: destination, ...touch() });
+    } else await db.transaction('rw', db.boards, async () => {
+      await db.boards.update(record.key, { folderId: destination, ...touch() });
+      // A document's page boards live in its folder, so folder search finds their notes.
+      for (const page of pageBoardsOf(workspace.boards, record.id).values()) await db.boards.update(page.key, { folderId: destination, ...touch() });
+    });
     setDialog(null); setMenuFor(null); void sync();
   }
   async function moveToTrash(record: Board | Folder) {
     await flushCanvas();
     if ('parentId' in record) await trashFolder(scope, record.id);
-    else await db.boards.update(record.key, { deleted: true, ...touch() });
-    if (record.id === boardId) setBoardId(null);
+    else await db.transaction('rw', db.boards, async () => {
+      await db.boards.update(record.key, { deleted: true, ...touch() });
+      for (const page of pageBoardsOf(workspace.boards, record.id).values()) await db.boards.update(page.key, { deleted: true, ...touch() });
+    });
+    if (record.id === boardId || currentPageRef?.docId === record.id) setBoardId(null);
     if ('parentId' in record && descendantFolderIds(workspace.folders, record.id).has(folderId || '')) { setFolderId(null); setBoardId(null); }
     setMenuFor(null); message('Moved to Trash. You can restore it anytime.'); void sync();
   }
@@ -326,7 +392,10 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
         for (const folder of allFolders.filter(x => descendants.has(x.id))) await db.folders.update(folder.key, { deleted: false, ...touch() });
         const boards = await db.boards.where('scope').equals(scope).toArray();
         for (const board of boards.filter(x => !x.purged && x.folderId && descendants.has(x.folderId))) await db.boards.update(board.key, { deleted: false, ...touch() });
-      } else { await restoreFolder(record.folderId); await db.boards.update(record.key, { deleted: false, ...touch() }); }
+      } else {
+        await restoreFolder(record.folderId); await db.boards.update(record.key, { deleted: false, ...touch() });
+        if (pdfDoc(record)) for (const page of await db.boards.where('scope').equals(scope).filter(item => item.deleted && !item.purged && pdfPageRef(item)?.docId === record.id).toArray()) await db.boards.update(page.key, { deleted: false, ...touch() });
+      }
     });
     message('Restored to your library'); void sync();
   }
@@ -335,6 +404,11 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     if (scope !== 'local') await sync();
     if (activeScope.current !== scope) return;
     const selection = await trashSelection(scope, record ? { kind: 'parentId' in record ? 'folder' : 'board', id: record.id } : undefined);
+    if (record && 'elements' in record && pdfDoc(record)) {
+      // A document's page boards are deleted with it.
+      const ids = new Set(selection.boards.map(item => item.id));
+      selection.boards.push(...(await db.boards.where('scope').equals(scope).filter(item => item.deleted && !item.purged && pdfPageRef(item)?.docId === record.id && !ids.has(item.id)).toArray()));
+    }
     if (!selection.folders.length && !selection.boards.length) { message('Trash is already empty.'); return; }
     setDeleteTrash({ scope, selection, empty: !record });
   }
@@ -361,17 +435,35 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     await flushCanvas();
     if (client) {
       const { downloadAsset } = await import('./lib/sync');
-      for (const asset of assets.filter(x => !x.dataURL)) await downloadAsset(client, asset);
+      for (const asset of assets.filter(x => !x.dataURL && !isPdfAsset(x))) await downloadAsset(client, asset);
     }
-    const backup = { format: 'note-backup', version: 1, exportedAt: new Date().toISOString(), folders: await db.folders.where('scope').equals(scope).filter(item => !item.purged).toArray(), boards: await db.boards.where('scope').equals(scope).filter(item => !item.purged).toArray(), assets: await db.assets.where('scope').equals(scope).toArray() };
+    const allAssets = await db.assets.where('scope').equals(scope).toArray();
+    // Document files travel inside the backup as data URLs, next to the images.
+    const documents: { id: string; dataURL: string }[] = [];
+    for (const asset of allAssets.filter(isPdfAsset)) {
+      try { documents.push({ id: asset.id, dataURL: await blobToDataURL(await pdfBlob(client, scope, asset.id)) }); }
+      catch (error) { throw new Error(`A document file could not be included: ${messageOf(error)}`); }
+    }
+    const backup = { format: 'note-backup', version: 1, exportedAt: new Date().toISOString(), folders: await db.folders.where('scope').equals(scope).filter(item => !item.purged).toArray(), boards: await db.boards.where('scope').equals(scope).filter(item => !item.purged).toArray(), assets: allAssets, documents };
     download(`note-backup-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(backup)], { type: 'application/json' }));
-    message('Backup exported, including your images');
+    message(documents.length ? 'Backup exported, including your images and documents' : 'Backup exported, including your images');
   }
   async function importBackup(file: File) {
     const data = JSON.parse(await file.text());
     if (data.format !== 'note-backup' || data.version !== 1 || !Array.isArray(data.boards) || !Array.isArray(data.folders) || !Array.isArray(data.assets)) throw new Error('Choose a Note backup JSON file.');
     const folderIds = new Map<string, string>(data.folders.filter((item: Folder) => !item.purged).map((x: Folder) => [x.id, crypto.randomUUID()]));
-    await db.transaction('rw', db.folders, db.boards, db.assets, async () => {
+    const documents = new Map<string, Blob>();
+    for (const item of Array.isArray(data.documents) ? data.documents : []) {
+      if (typeof item?.id !== 'string' || typeof item.dataURL !== 'string' || !item.dataURL.startsWith('data:application/pdf')) throw new Error('The backup has an invalid document file.');
+      documents.set(item.id, await (await fetch(item.dataURL)).blob());
+    }
+    // Board ids change on import; documents, their page boards and board-only references keep pointing at each other.
+    const boardIds = new Map<string, string>(data.boards.filter((item: Board) => !item.purged).map((x: Board) => [x.id, crypto.randomUUID()]));
+    const linkedState = (state: Board['appState']) => ({ ...state,
+      ...(state?.notePdfPage ? { notePdfPage: { ...state.notePdfPage, docId: boardIds.get(state.notePdfPage.docId) || state.notePdfPage.docId } } : {}),
+      ...(state?.notePdf?.boardId ? { notePdf: { ...state.notePdf, boardId: boardIds.get(state.notePdf.boardId) || state.notePdf.boardId } } : {}),
+      ...(Array.isArray(state?.noteReferences) ? { noteReferences: state.noteReferences.map(id => boardIds.get(id) || id) } : {}) });
+    await db.transaction('rw', [db.folders, db.boards, db.assets, db.files], async () => {
       for (const folder of data.folders.filter((item: Folder) => !item.purged)) {
         if (typeof folder.name !== 'string' || folder.name.length > 200) throw new Error('Invalid folder in backup.');
         const id = folderIds.get(folder.id)!;
@@ -379,10 +471,17 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
       }
       for (const board of data.boards.filter((item: Board) => !item.purged)) {
         if (typeof board.name !== 'string' || !Array.isArray(board.elements) || !Array.isArray(board.assetIds)) throw new Error('Invalid board in backup.');
-        const id = crypto.randomUUID();
-        await db.boards.put({ ...board, purged: false, syncBase: undefined, syncConflict: undefined, syncError: undefined, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...importedCreation(board), ...touch() });
+        const id = boardIds.get(board.id)!;
+        await db.boards.put({ ...board, appState: linkedState(board.appState || {}), purged: false, syncBase: undefined, syncConflict: undefined, syncError: undefined, id, scope, key: recordKey(scope, id), folderId: board.folderId ? folderIds.get(board.folderId) || null : null, remoteRevision: 0, ...importedCreation(board), ...touch() });
       }
       for (const asset of data.assets) {
+        if (isPdfAsset(asset)) {
+          const blob = documents.get(asset.id), key = recordKey(scope, asset.id);
+          if (typeof asset.id !== 'string' || !blob) throw new Error('The backup is missing a document file.');
+          if (!await db.files.get(key)) await db.files.put({ key, scope, id: asset.id, blob });
+          if (!await db.assets.get(key)) await db.assets.put({ ...asset, dataURL: undefined, scope, key, remotePath: null, storage: null, dirty: true });
+          continue;
+        }
         if (typeof asset.id !== 'string' || typeof asset.dataURL !== 'string' || !asset.dataURL.startsWith('data:image/')) throw new Error('The backup has a missing or invalid image.');
         const key = recordKey(scope, asset.id);
         if (!await db.assets.get(key)) await db.assets.put({ ...asset, scope, key, remotePath: null, storage: null, dirty: true });
@@ -394,13 +493,14 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     return <div className="item-menu" role="menu">
       <button role="menuitem" onClick={() => { setDialog({ kind: 'rename', record }); setMenuFor(null); }}>Rename <kbd>F2</kbd></button>
       <button role="menuitem" onClick={() => { setDialog({ kind: 'move', record }); setMenuFor(null); }}><Move size={14} /> Move to folder</button>
-      {'elements' in record && <button role="menuitem" onClick={() => void duplicate(record).catch(error => message(messageOf(error)))}>Duplicate board</button>}
+      {'elements' in record && !pdfDoc(record) && <button role="menuitem" onClick={() => void duplicate(record).catch(error => message(messageOf(error)))}>Duplicate board</button>}
+      {'elements' in record && pdfDoc(record) && <button role="menuitem" onClick={() => { setMenuFor(null); void downloadDocument(record); }}><ArrowDownToLine size={14} /> Download PDF</button>}
       <button role="menuitem" className="danger" onClick={() => void moveToTrash(record).catch(error => message(messageOf(error)))}><Trash2 size={14} /> Move to Trash</button>
     </div>;
   }
   function folderTree(parentId: string | null, depth = 0, seen = new Set<string>()) {
     return sortLibraryRecords(workspace.folders.filter(x => x.parentId === parentId && !seen.has(x.id)), librarySorts.folders).map(folder => {
-      const children = workspace.folders.some(x => x.parentId === folder.id) || workspace.boards.some(x => x.folderId === folder.id);
+      const children = workspace.folders.some(x => x.parentId === folder.id) || libraryItems.some(x => x.folderId === folder.id);
       const open = expanded.has(folder.id);
       return <div key={folder.id}>
         <div className={`tree-row ${folderId === folder.id && !boardId ? 'active' : ''}`} style={{ paddingLeft: 10 + depth * 15 }} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'folder', id: folder.id }))}
@@ -410,13 +510,21 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
           <button className="tree-more icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={15} /></button>
           {menuFor === folder.id && recordMenu(folder)}
         </div>
-        {open && <>{folderTree(folder.id, depth + 1, new Set([...seen, folder.id]))}{sortLibraryRecords(workspace.boards.filter(x => x.folderId === folder.id), librarySorts.boards).map(board => <button key={board.id} className={`tree-board ${boardId === board.id ? 'active' : ''}`} style={{ paddingLeft: 36 + depth * 15 }} onClick={() => void openBoard(board)} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}><StickyNote size={15} /><span>{board.name}</span></button>)}</>}
+        {open && <>{folderTree(folder.id, depth + 1, new Set([...seen, folder.id]))}{sortLibraryRecords(libraryItems.filter(x => x.folderId === folder.id), librarySorts.boards).map(board => <button key={board.id} className={`tree-board ${boardId === board.id || currentPageRef?.docId === board.id ? 'active' : ''}`} style={{ paddingLeft: 36 + depth * 15 }} onClick={() => void openBoard(board)} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}>{pdfDoc(board) ? <FileText size={15} /> : <StickyNote size={15} />}<span>{board.name}</span></button>)}</>}
       </div>;
     });
   }
   const directFolders = sortLibraryRecords(workspace.folders.filter(x => x.parentId === folderId), librarySorts.folders);
-  const visibleBoards = sortLibraryRecords(workspace.boards.filter(x => folderId === null || x.folderId === folderId), librarySorts.boards);
-  const matches = dialog?.kind === 'search' ? searchBoards(workspace.boards, workspace.folders, assets, query, searchFolderId) : [];
+  const visibleBoards = sortLibraryRecords(plainBoards.filter(x => folderId === null || x.folderId === folderId), librarySorts.boards);
+  const visibleDocs = sortLibraryRecords(libraryItems.filter(x => isLibraryDoc(x) && (folderId === null || x.folderId === folderId)), librarySorts.boards);
+  const annotatedPages = (doc: Board) => [...pageBoardsOf(workspace.boards, doc.id).values()].filter(page => { const notes = pageNotes(page.elements); return notes.notes + notes.highlights > 0; }).length;
+  const matches = dialog?.kind === 'search' ? searchBoards(workspace.boards, workspace.folders, assets, query, searchFolderId, pdfText) : [];
+  const folderCount = (id: string) => {
+    const inside = descendantFolderIds(workspace.folders, id), items = libraryItems.filter(x => x.folderId && inside.has(x.folderId));
+    const docs = items.filter(isLibraryDoc).length, boards = items.length - docs;
+    return [`${boards} board${boards === 1 ? '' : 's'}`, docs ? `${docs} doc${docs === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+  };
+  const visibleTrash = trash.filter(record => !('elements' in record) || isLibraryItem(record));
   const pendingSync = pendingSyncItems([...workspace.boards, ...trash.filter((record): record is Board => 'elements' in record)], [...workspace.folders, ...trash.filter((record): record is Folder => 'parentId' in record)], assets);
   const dirtyCount = pendingSync.length;
   const pendingLabel = pendingSyncLabel(pendingSync);
@@ -428,15 +536,17 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
       <button className="brand" onClick={() => void navigateFolder(null)}><span className="brand-mark">N<span /></span><span>Note<span className="brand-caption">a little room for big ideas</span></span></button>
       <button className="search-trigger" onClick={openSearch}><Search size={16} /><span>Find anything</span><kbd>Ctrl K</kbd></button>
       <button className="new-board-button" onClick={() => setDialog({ kind: 'board' })}><Plus size={18} /><span>New board</span><span className="new-shortcut">↵</span></button>
-      <nav className="sidebar-nav" aria-label="Library navigation"><button className={`nav-row ${folderId === null && !boardId && view === 'library' ? 'active' : ''}`} onClick={() => void navigateFolder(null)}><LayoutGrid size={17} /><span>All boards</span><span className="count">{workspace.boards.length}</span></button></nav>
+      <button className="new-document-button" onClick={() => documentInput.current?.click()} disabled={!!importing} title="Add a PDF, or a Word file (.docx) converted to PDF on this device">{importing ? <Loader2 size={16} className="spinning" /> : <FileUp size={16} />}<span>{importing ? 'Adding document…' : 'Add PDF or Word'}</span></button>
+      <input ref={documentInput} type="file" accept={DOCUMENT_ACCEPT} multiple hidden onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ''; setSidebarOpen(false); if (files.length) void addDocuments(files); }} />
+      <nav className="sidebar-nav" aria-label="Library navigation"><button className={`nav-row ${folderId === null && !boardId && view === 'library' ? 'active' : ''}`} onClick={() => void navigateFolder(null)}><LayoutGrid size={17} /><span>All boards</span><span className="count">{libraryItems.length}</span></button></nav>
       <div className="tree-heading"><span>YOUR FOLDERS</span><button className="icon-button" aria-label="New folder" title="New folder (Ctrl Alt Shift N)" onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={16} /></button></div>
       <div className="folder-tree" onDragOver={event => event.preventDefault()} onDrop={event => { if (event.target !== event.currentTarget) return; try { const data = JSON.parse(event.dataTransfer.getData('application/x-note')); const record = data.kind === 'folder' ? workspace.folders.find(x => x.id === data.id) : workspace.boards.find(x => x.id === data.id); if (record) void moveRecord(record, null).catch(error => message(messageOf(error))); } catch {} }}>
         {folderTree(null)}
-        {sortLibraryRecords(workspace.boards.filter(x => x.folderId === null), librarySorts.boards).map(board => <button className={`tree-board ${boardId === board.id ? 'active' : ''}`} key={board.id} onClick={() => void openBoard(board)}><StickyNote size={15} /><span>{board.name}</span></button>)}
+        {sortLibraryRecords(libraryItems.filter(x => x.folderId === null), librarySorts.boards).map(board => <button className={`tree-board ${boardId === board.id || currentPageRef?.docId === board.id ? 'active' : ''}`} key={board.id} onClick={() => void openBoard(board)}>{pdfDoc(board) ? <FileText size={15} /> : <StickyNote size={15} />}<span>{board.name}</span></button>)}
         {!workspace.folders.length && <p className="tree-empty">Make a folder for a project,<br />or a corner of your mind.</p>}
       </div>
       <div className="sidebar-bottom">
-        <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setFolderId(null); setView('trash'); setSidebarOpen(false); setMenuFor(null); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{trash.length > 0 && <span className="count">{trash.length}</span>}</button>
+        <button className={`nav-row ${view === 'trash' ? 'active' : ''}`} onClick={() => void flushCanvas().then(() => { setBoardId(null); setFolderId(null); setView('trash'); setSidebarOpen(false); setMenuFor(null); }).catch(error => message(messageOf(error)))}><Trash2 size={16} /><span>Trash</span>{visibleTrash.length > 0 && <span className="count">{visibleTrash.length}</span>}</button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'help' })}><Keyboard size={16} /><span>Keyboard shortcuts</span><kbd>?</kbd></button>
         <button className="nav-row" onClick={() => setDialog({ kind: 'settings' })}><SettingsIcon size={16} /><span>Settings & storage</span></button>
         <nav className="legal-links" aria-label="About and policies"><a href="./about.html" target="_blank" rel="noreferrer">About</a><a href="./privacy.html" target="_blank" rel="noreferrer">Privacy</a><a href="./terms.html" target="_blank" rel="noreferrer">Terms</a></nav>
@@ -445,18 +555,26 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
     </aside>
     <main className="main-content">
       {sessionNotice && <div className="session-recovery" role="status"><span>{sessionNotice}</span><button type="button" onClick={onRetrySession}>Retry connection</button></div>}
-      <header className="topbar"><div className="topbar-left"><button className="icon-button desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!sidebarCollapsed} aria-controls="note-sidebar" onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><button onClick={() => void navigateFolder(null)}><Grid2X2 size={14} /> Workspace</button>{path.map(folder => <span key={folder.id}><ChevronRight size={13} /><button onClick={() => void navigateFolder(folder.id)}>{folder.name}</button></span>)}{currentBoard && <span><ChevronRight size={13} /><button className="breadcrumb-current" onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>{currentBoard.name}</button></span>}</div></div>
+      <header className="topbar"><div className="topbar-left"><button className="icon-button desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!sidebarCollapsed} aria-controls="note-sidebar" onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><button onClick={() => void navigateFolder(null)}><Grid2X2 size={14} /> Workspace</button>{path.map(folder => <span key={folder.id}><ChevronRight size={13} /><button onClick={() => void navigateFolder(folder.id)}>{folder.name}</button></span>)}{pageParent && currentPageRef ? <><span><ChevronRight size={13} /><button onClick={() => void openBoard(pageParent, undefined, currentPageRef.page)}>{pageParent.name}</button></span><span><ChevronRight size={13} /><span className="breadcrumb-current breadcrumb-static">Page {currentPageRef.page}</span></span></>
+          : currentBoard && <span><ChevronRight size={13} /><button className="breadcrumb-current" onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>{currentBoard.name}</button></span>}</div></div>
         <div className="topbar-actions"><a className="app-version" href="./updates.html" target="_blank" rel="noreferrer" aria-label={`Note version ${APP_VERSION}. View version updates`}>v{APP_VERSION}</a><button className={`save-status ${syncing ? 'is-syncing' : ''} ${syncFailed || imageFailed ? 'sync-attention' : ''}`} aria-label={scope === 'local' ? 'Saved locally. Sign in to sync' : `Sync now. ${syncing ? 'Syncing; click to queue another pass' : syncStatus}${imageSummary ? ` · ${imageSummary}` : ''}`} aria-busy={syncing || imagesLoading} title={scope === 'local' ? syncStatus : `${syncStatus}${dirtyCount ? ` · ${pendingLabel} waiting` : ''}${imageSummary ? ` · ${imageSummary}` : ''}`} onClick={() => scope === 'local' ? setDialog({ kind: 'settings' }) : void sync()}>{syncing || imagesLoading ? <Loader2 size={14} className="spinning" /> : scope === 'local' ? <CloudOff size={14} /> : syncFailed || imageFailed ? <TriangleAlert size={14} /> : dirtyCount ? <RefreshCw size={14} /> : <Check size={14} />}<span>{scope === 'local' ? 'Saved locally' : syncing ? 'Syncing' : syncFailed ? 'Sync needs attention' : dirtyCount ? `${pendingSync.some(item => item.kind !== pendingSync[0].kind) ? `${dirtyCount} items` : pendingLabel} pending` : imageFailed ? 'Images need attention' : imagesLoading ? 'Loading images' : syncStatus.startsWith('Everything') ? 'Synced' : 'Check sync'}</span></button>{scope !== 'local' && <button className="icon-button sync-details-trigger" aria-label="Sync details" title="See what is waiting and why" onClick={() => setSyncDetails(true)}><CircleHelp size={16} /></button>}{currentBoard && <span className="board-header-tools" />}{installEvent && <button className="icon-button" title="Install Note" aria-label="Install Note" onClick={() => void installEvent.prompt().then(() => setInstallEvent(null))}><ArrowDownToLine size={17} /></button>}
-        {currentBoard ? <div className="board-options"><button className="icon-button" aria-label="Board options" onClick={() => setMenuFor(menuFor === currentBoard.id ? null : currentBoard.id)}><MoreHorizontal size={21} /></button>{menuFor === currentBoard.id && <div className="item-menu board-menu"><button onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>Rename</button><button onClick={() => setDialog({ kind: 'move', record: currentBoard })}>Move to folder</button><button onClick={() => void canvasRef.current?.exportPng().then(blob => { if (blob) download(`${currentBoard.name}.png`, blob); else message('Add something to the board first.'); }).catch(error => message(messageOf(error)))}>Export PNG</button><hr /><button onClick={() => { setMenuFor(null); canvasRef.current?.readText(); }}>Read text in images & handwriting</button><button onClick={() => { setMenuFor(null); canvasRef.current?.toggleControls(); }}>{canvasRef.current?.toolbarsHidden() ? 'Show toolbars' : 'Hide toolbars'}</button>{scope !== 'local' && <button onClick={() => { setMenuFor(null); setSyncDetails(true); }}>Sync details</button>}<hr /><button className="danger" onClick={() => void moveToTrash(currentBoard)}>Move to Trash</button><a className="item-menu-footer" href="./updates.html" target="_blank" rel="noreferrer">Note v{APP_VERSION} · What’s new</a></div>}</div> : <button className="icon-button" aria-label="Search workspace" onClick={openSearch}><Search size={18} /></button>}</div>
+        {currentBoard ? <div className="board-options"><button className="icon-button" aria-label="Board options" onClick={() => setMenuFor(menuFor === currentBoard.id ? null : currentBoard.id)}><MoreHorizontal size={21} /></button>{menuFor === currentBoard.id && (currentDoc ? <div className="item-menu board-menu"><button onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>Rename</button><button onClick={() => setDialog({ kind: 'move', record: currentBoard })}>Move to folder</button><button onClick={() => { setMenuFor(null); void downloadDocument(currentBoard); }}>Download PDF</button>{scope !== 'local' && <button onClick={() => { setMenuFor(null); setSyncDetails(true); }}>Sync details</button>}<hr /><button className="danger" onClick={() => void moveToTrash(currentBoard)}>Move to Trash</button></div>
+          : <div className="item-menu board-menu">{pageParent && currentPageRef ? <><button onClick={() => void openBoard(pageParent, undefined, currentPageRef.page)}>Back to {pageParent.name}</button><hr /></> : <><button onClick={() => setDialog({ kind: 'rename', record: currentBoard })}>Rename</button><button onClick={() => setDialog({ kind: 'move', record: currentBoard })}>Move to folder</button></>}<button onClick={() => void canvasRef.current?.exportPng().then(blob => { if (blob) download(`${currentBoard.name}.png`, blob); else message('Add something to the board first.'); }).catch(error => message(messageOf(error)))}>Export PNG</button><hr /><button onClick={() => { setMenuFor(null); canvasRef.current?.readText(); }}>Read text in images & handwriting</button><button onClick={() => { setMenuFor(null); canvasRef.current?.toggleControls(); }}>{canvasRef.current?.toolbarsHidden() ? 'Show toolbars' : 'Hide toolbars'}</button>{scope !== 'local' && <button onClick={() => { setMenuFor(null); setSyncDetails(true); }}>Sync details</button>}{!currentPageRef && <><hr /><button className="danger" onClick={() => void moveToTrash(currentBoard)}>Move to Trash</button></>}<a className="item-menu-footer" href="./updates.html" target="_blank" rel="noreferrer">Note v{APP_VERSION} · What’s new</a></div>)}</div> : <button className="icon-button" aria-label="Search workspace" onClick={openSearch}><Search size={18} /></button>}</div>
       </header>
       {needRefresh && <div className="update-banner"><span>A new version of Note is ready.</span><button onClick={() => void flushCanvas().then(() => updateServiceWorker(true)).catch(error => message(messageOf(error)))}>Save and update <RefreshCw size={13} /></button></div>}
       {currentImages && <BoardImageNotice state={currentImages} onRetry={() => void canvasRef.current?.reloadImages()} onReconnect={() => void signInWithGoogle().catch(error => message(messageOf(error)))} />}
-      {currentBoard ? <div className="editor-container"><BoardCanvas key={currentBoard.key} ref={canvasRef} board={currentBoard} settings={settings} client={client} onSaved={() => { if (scope === 'local') setSyncStatus('Saved on this device'); }} onMessage={message} onImageState={imageStateChanged} jumpId={jumpId} /></div>
-        : view === 'trash' ? <section className="library"><div className="library-intro trash-heading"><div><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore an item, or delete it permanently.</p></div>{trash.length > 0 && <button className="secondary-button danger" onClick={() => void requestTrashDelete().catch(error => message(messageOf(error)))}><Trash2 size={15} />Empty Trash</button>}</div>{trash.length ? <div className="trash-list">{trash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><div className="trash-item-actions"><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button><button className="secondary-button danger" aria-label={`Delete ${record.name} permanently`} onClick={() => void requestTrashDelete(record).catch(error => message(messageOf(error)))}>Delete permanently</button></div></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
-        : <section className="library"><div className="library-intro"><p className="eyebrow">YOUR SPACE TO THINK</p><div className="library-title"><h1>{currentFolder?.name || 'A little room for big ideas.'}</h1>{currentFolder && <button className="icon-button" aria-label="Rename current folder" onClick={() => setDialog({ kind: 'rename', record: currentFolder })}><MoreHorizontal size={22} /></button>}</div><p>{currentFolder ? 'Keep everything together. Give every thought a little space.' : 'Collect the things that spark something. Make sense of them here.'}</p></div>
+      {currentDoc ? <PdfReader key={currentDoc.key} board={currentDoc} boards={workspace.boards} scope={scope} client={client} initialPage={readerPage?.page} onAnnotate={page => void openDocumentPage(currentDoc, page)} onMessage={message} />
+        : currentBoard ? <div className="editor-container"><BoardCanvas key={currentBoard.key} ref={canvasRef} board={currentBoard} settings={settings} client={client} onSaved={() => { if (scope === 'local') setSyncStatus('Saved on this device'); }} onMessage={message} onImageState={imageStateChanged} jumpId={jumpId} boards={workspace.boards}
+          pageNav={pageParent && currentPageRef ? { docName: pageParent.name, page: currentPageRef.page, pages: pdfDoc(pageParent)!.pages, onBack: () => void openBoard(pageParent, undefined, currentPageRef.page), onGo: page => void openDocumentPage(pageParent, page) } : undefined} /></div>
+        : view === 'trash' ? <section className="library"><div className="library-intro trash-heading"><div><p className="eyebrow">A SECOND CHANCE</p><h1>Trash</h1><p>Restore an item, or delete it permanently.</p></div>{visibleTrash.length > 0 && <button className="secondary-button danger" onClick={() => void requestTrashDelete().catch(error => message(messageOf(error)))}><Trash2 size={15} />Empty Trash</button>}</div>{visibleTrash.length ? <div className="trash-list">{visibleTrash.map(record => <div key={record.key}>{'parentId' in record ? <FolderIcon size={19} /> : pdfDoc(record) ? <FileText size={19} /> : <StickyNote size={19} />}<span>{record.name}</span><div className="trash-item-actions"><button className="secondary-button" onClick={() => void restore(record).catch(error => message(messageOf(error)))}>Restore</button><button className="secondary-button danger" aria-label={`Delete ${record.name} permanently`} onClick={() => void requestTrashDelete(record).catch(error => message(messageOf(error)))}>Delete permanently</button></div></div>)}</div> : <div className="empty-library"><Trash2 size={32} /><h2>Nothing in Trash</h2><p>Your ideas are right where you left them.</p></div>}</section>
+        : <section className={`library${dropping ? ' is-dropping' : ''}`} onDragOver={event => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropping(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropping(false); }}
+          onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDropping(false); void addDocuments(Array.from(event.dataTransfer.files)); }}><div className="library-intro"><p className="eyebrow">YOUR SPACE TO THINK</p><div className="library-title"><h1>{currentFolder?.name || 'A little room for big ideas.'}</h1>{currentFolder && <button className="icon-button" aria-label="Rename current folder" onClick={() => setDialog({ kind: 'rename', record: currentFolder })}><MoreHorizontal size={22} /></button>}</div><p>{currentFolder ? 'Keep everything together. Give every thought a little space.' : 'Collect the things that spark something. Make sense of them here.'}</p></div>
           <div className="section-heading library-section-heading"><h2>Folders <span>{directFolders.length}</span></h2><div className="library-actions"><LibrarySort label="Sort folders" value={librarySorts.folders} onChange={value => setLibrarySorts(previous => ({ ...previous, folders: value }))} /><button onClick={() => setDialog({ kind: 'folder' })}><FolderPlus size={15} /> New folder</button></div></div>
           {librarySorts.folders.startsWith('created') && directFolders.some(item => !item.createdAt || item.createdAtEstimated) && <p className="library-sort-note">Older items use their earliest recorded date.</p>}
-          <div className="folder-grid">{directFolders.map(folder => <div className="folder-card" key={folder.id}><button className="folder-card-main" onClick={() => void navigateFolder(folder.id)}><FolderIcon size={31} fill={folder.color} color={folder.color} /><span><strong>{folder.name}</strong><small>{workspace.boards.filter(x => x.folderId && descendantFolderIds(workspace.folders, folder.id).has(x.folderId)).length} boards</small></span></button><button className="card-menu-button icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={17} /></button>{menuFor === folder.id && recordMenu(folder)}</div>)}</div>
+          <div className="folder-grid">{directFolders.map(folder => <div className="folder-card" key={folder.id}><button className="folder-card-main" onClick={() => void navigateFolder(folder.id)}><FolderIcon size={31} fill={folder.color} color={folder.color} /><span><strong>{folder.name}</strong><small>{folderCount(folder.id)}</small></span></button><button className="card-menu-button icon-button" aria-label={`Options for ${folder.name}`} onClick={() => setMenuFor(menuFor === folder.id ? null : folder.id)}><MoreHorizontal size={17} /></button>{menuFor === folder.id && recordMenu(folder)}</div>)}</div>
+          <div className="section-heading library-section-heading"><h2>{folderId ? 'Documents in this folder' : 'Your documents'} <span>{visibleDocs.length}</span></h2><div className="library-actions"><button onClick={() => documentInput.current?.click()} disabled={!!importing}><FileUp size={15} /> Add PDF or Word</button></div></div>
+          <div className="board-grid doc-grid">{visibleDocs.map(doc => <div className="board-card doc-card" key={doc.id} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: doc.id }))}><DocumentCard board={doc} scope={scope} client={client} annotated={annotatedPages(doc)} place={folderPath(workspace.folders, doc.folderId).map(x => x.name).join(' / ') || 'Workspace'} date={relativeDate(doc.updatedAt)} onOpen={() => void openBoard(doc)} /><button className="card-menu-button icon-button" aria-label={`Options for ${doc.name}`} onClick={() => setMenuFor(menuFor === doc.id ? null : doc.id)}><MoreHorizontal size={18} /></button>{menuFor === doc.id && recordMenu(doc)}</div>)}
+            <button className={`create-board-card doc-drop${importing ? ' is-busy' : ''}`} onClick={() => documentInput.current?.click()} disabled={!!importing}><span>{importing ? <Loader2 size={22} className="spinning" /> : <FileUp size={22} />}</span><strong>{importing || 'Add a PDF or Word file'}</strong><small>{importing ? 'Reading every page so you can search it' : 'Or drop it anywhere here. Each page gets its own board.'}</small></button></div>
           <div className="section-heading board-section-heading library-section-heading"><h2>{folderId ? 'Boards in this folder' : 'Your boards'} <span>{visibleBoards.length}</span></h2><div className="library-actions"><LibrarySort label="Sort boards" value={librarySorts.boards} onChange={value => setLibrarySorts(previous => ({ ...previous, boards: value }))} /><button onClick={() => setDialog({ kind: 'board' })}><Plus size={15} /> New board</button></div></div>
           {librarySorts.boards.startsWith('created') && visibleBoards.some(item => !item.createdAt || item.createdAtEstimated) && <p className="library-sort-note">Older items use their earliest recorded date.</p>}
           <div className="board-grid">{visibleBoards.map((board, index) => <div className="board-card" key={board.id} draggable onDragStart={event => event.dataTransfer.setData('application/x-note', JSON.stringify({ kind: 'board', id: board.id }))}><button className={`board-card-main card-color-${index % 4}`} onClick={() => void openBoard(board)}><div className="board-thumbnail"><BoardThumbnail board={board} /><span className="thumbnail-open"><ArrowUpRight size={18} /></span></div><div className="board-card-info"><strong>{board.name}</strong><span>{folderPath(workspace.folders, board.folderId).map(x => x.name).join(' / ') || 'Workspace'}<i />{relativeDate(board.updatedAt)}</span></div></button><button className="card-menu-button icon-button" aria-label={`Options for ${board.name}`} onClick={() => setMenuFor(menuFor === board.id ? null : board.id)}><MoreHorizontal size={18} /></button>{menuFor === board.id && recordMenu(board)}</div>)}<button className="create-board-card" onClick={() => setDialog({ kind: 'board' })}><span><Plus size={24} /></span><strong>A fresh canvas</strong><small>Make room for the next idea</small></button></div>
@@ -471,8 +589,8 @@ function Workspace({ session, client, onGoogle, sessionNotice, onRetrySession }:
       setDialog(null); setSidebarOpen(false); void sync();
     }} />}
     {dialog?.kind === 'move' && dialog.record && <MoveDialog record={dialog.record} folders={workspace.folders} onClose={() => setDialog(null)} onMove={destination => moveRecord(dialog.record!, destination)} />}
-    {dialog?.kind === 'search' && <Modal title="Find anything" wide onClose={() => setDialog(null)}><div className="search-modal-input"><Search size={20} /><input autoFocus aria-label="Search notes and boards" placeholder="A word, an idea, a screenshot…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>Esc</kbd></div><div className="search-scope"><span>Search in</span><select aria-label="Search folder" value={searchFolderId || ''} onChange={event => setSearchFolderId(event.target.value || null)}><option value="">Entire workspace</option>{workspace.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(workspace.folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select><small>Includes all subfolders</small></div><div className="search-results">{!query.trim() ? <div className="search-empty"><Search size={26} /><p>Search board names, typed notes, image text, and saved handwriting text.</p></div> : matches.length ? matches.map((match, index) => <SearchResult key={`${match.board.id}:${match.elementId || 'title'}:${index}`} match={match} folders={workspace.folders} onOpen={() => void openBoard(match.board, match.elementId)} />) : <div className="search-empty"><p>No matches in this folder.</p><small>Try fewer words or choose Entire workspace.</small></div>}</div></Modal>}
-    {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image / formatted Markdown', 'Ctrl V'], ['Paste literal text / Markdown', 'Ctrl Shift V'], ['Bold / italic / underline in text', 'Ctrl B / I / U'], ['Text commands while typing', '/'], ['Finish text edit', 'Esc / Ctrl Enter'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Connection: add / remove bend', 'Double-click / double-tap'], ['Group / ungroup objects', 'Ctrl G / Ctrl Shift G'], ['Lock / unlock selection', 'Ctrl Shift L'], ['Snip from screen / take photo', 'X / C'], ['Stamp last icon', 'I'], ['Selected eraser mode', 'E'], ['Stop stamping', 'Esc'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Hold the pen briefly before lifting to clean up a recognizable shape; immediate release keeps freehand ink. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
+    {dialog?.kind === 'search' && <Modal title="Find anything" wide onClose={() => setDialog(null)}><div className="search-modal-input"><Search size={20} /><input autoFocus aria-label="Search notes and boards" placeholder="A word, an idea, a screenshot…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>Esc</kbd></div><div className="search-scope"><span>Search in</span><select aria-label="Search folder" value={searchFolderId || ''} onChange={event => setSearchFolderId(event.target.value || null)}><option value="">Entire workspace</option>{workspace.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(workspace.folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select><small>Includes all subfolders</small></div><div className="search-results">{!query.trim() ? <div className="search-empty"><Search size={26} /><p>Search board names, typed notes, image text, handwriting, and the pages of your documents and their notes.</p></div> : matches.length ? matches.slice(0, 200).map((match, index) => <SearchResult key={`${match.board.id}:${match.elementId || 'title'}:${match.page || 0}:${index}`} match={match} folders={workspace.folders} onOpen={() => void openBoard(match.board, match.elementId, match.kind === 'pdf' && !match.elementId ? match.page : undefined)} />) : <div className="search-empty"><p>No matches in this folder.</p><small>Try fewer words or choose Entire workspace.</small></div>}</div></Modal>}
+    {dialog?.kind === 'help' && <Modal title="Less clicking. More thinking." wide onClose={() => setDialog(null)}><p className="dialog-description">Your keyboard belongs on the canvas.</p><div className="shortcut-grid">{[['Find across boards', 'Ctrl K'], ['New board', 'Ctrl Alt N'], ['New folder', 'Ctrl Alt Shift N'], ['Save / sync', 'Ctrl S'], ['Rename open board', 'F2'], ['Paste image / formatted Markdown', 'Ctrl V'], ['Paste literal text / Markdown', 'Ctrl Shift V'], ['Bold / italic / underline in text', 'Ctrl B / I / U'], ['Text commands while typing', '/'], ['Finish text edit', 'Esc / Ctrl Enter'], ['Copy / cut selection', 'Ctrl C / X'], ['Undo / redo', 'Ctrl Z / Y'], ['Duplicate selection', 'Ctrl D'], ['Select all', 'Ctrl A'], ['Delete selection', 'Delete'], ['Type text', 'T'], ['Draw / arrow / rectangle', 'P / A / R'], ['Diagram: add child', 'Tab'], ['Diagram: add sibling', 'Shift Tab'], ['Connection: add / remove bend', 'Double-click / double-tap'], ['Group / ungroup objects', 'Ctrl G / Ctrl Shift G'], ['Lock / unlock selection', 'Ctrl Shift L'], ['Snip from screen / take photo', 'X / C'], ['Stamp last icon', 'I'], ['Selected eraser mode', 'E'], ['Stop stamping', 'Esc'], ['Pan canvas', 'Space + drag'], ['Zoom canvas', 'Ctrl + scroll'], ['Document: search / zoom', 'Ctrl F / Ctrl + −'], ['Document: fit width', 'Ctrl 0'], ['Page words: select all', 'Ctrl A'], ['Show shortcuts', '?']].map(([name, shortcut]) => <div key={name}><span>{name}</span><kbd>{shortcut}</kbd></div>)}</div><p className="small-note">Use Cmd instead of Ctrl on Mac. Diagram shortcuts work on a selected diagram shape or while typing its label. Hold the pen briefly before lifting to clean up a recognizable shape; immediate release keeps freehand ink. Other canvas shortcuts work when you aren’t editing text.</p></Modal>}
     {deleteTrash && <DeleteTrashDialog selection={deleteTrash.selection} empty={deleteTrash.empty} cloud={deleteTrash.scope !== 'local'} onClose={() => setDeleteTrash(null)} onDelete={confirmTrashDelete} />}
     {syncDetails && session && <SyncDetails account={session.user.email || session.user.id} status={syncStatus} pending={pendingSync} syncing={syncing} lastChecked={lastChecked} lastSynced={lastSynced} conflicts={[...workspace.boards, ...workspace.folders, ...trash].filter(record => !!record.syncConflict)} onResolveConflict={chooseSyncVersion} images={currentImages} onRetryImages={() => void canvasRef.current?.reloadImages()} onSync={sync} onClose={() => setSyncDetails(false)} />}
     {dialog?.kind === 'settings' && <SettingsDialog settings={settings} session={session} driveStatus={driveStatus} syncStatus={syncStatus} onSyncDetails={() => { setDialog(null); setSyncDetails(true); }} assets={assets} syncing={syncing} onSyncNow={sync} onClose={() => setDialog(null)} onSave={async next => { await flushCanvas(); setSettings(next); storeSettings(next); message('Settings saved'); }} onSignOut={async () => { await flushCanvas(); await syncPromise.current; const { error } = await client.auth.signOut({ scope: 'local' }); if (error) throw error; disconnectDrive(); }} onConnectDrive={signInWithGoogle} onExport={exportBackup} onImport={importBackup} onImportLocal={async () => { await importLocalWorkspace(scope); message('Device boards copied into your account'); void sync(); }} onRetryOcr={async () => { for (let asset of assets.filter(x => x.ocrStatus !== 'done' || !x.ocrText.trim())) { if (!asset.dataURL && client) { await downloadAsset(client, asset); asset = (await db.assets.get(asset.key)) || asset; } if (asset.dataURL) void queueOcr(asset, { force: true }); } message('Image text recognition queued'); }} />}
@@ -489,7 +607,9 @@ function MoveDialog({ record, folders, onClose, onMove }: { record: Board | Fold
   return <Modal title={`Move ${record.name}`} onClose={onClose}><form onSubmit={event => { event.preventDefault(); void onMove(destination || null).catch(error => setError(messageOf(error))); }}><label>Destination folder<select value={destination} onChange={event => setDestination(event.target.value)}><option value="">Workspace</option>{folders.filter(folder => !('parentId' in record) || canMoveFolder(folders, record.id, folder.id)).map(folder => <option key={folder.id} value={folder.id}>{folderPath(folders, folder.id).map(x => x.name).join(' / ')}</option>)}</select></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">Move here</button></div></form></Modal>;
 }
 function SearchResult({ match, folders, onOpen }: { match: SearchMatch; folders: Folder[]; onOpen: () => void }) {
-  return <button className="search-result" onClick={onOpen}><span className={`result-icon ${match.kind}`}>{match.kind === 'image' ? <Image size={18} /> : <StickyNote size={18} />}</span><span><strong>{match.board.name}</strong><small>{folderPath(folders, match.board.folderId).map(x => x.name).join(' / ') || 'Workspace'} · {match.kind === 'image' ? 'Image text' : match.kind === 'title' ? 'Board name' : match.kind === 'handwriting' ? 'Handwriting' : 'Typed note'}</small><p>{match.text.slice(0, 240)}</p></span><ArrowUpRight size={17} /></button>;
+  const doc = !!pdfDoc(match.board);
+  const kind = match.kind === 'image' ? 'Image text' : match.kind === 'title' ? doc ? 'Document name' : 'Board name' : match.kind === 'handwriting' ? 'Handwriting' : match.kind === 'pdf' ? match.page ? `Page ${match.page}` : 'Document page' : match.kind === 'pdf-notes' ? 'Your notes on this page' : 'Typed note';
+  return <button className="search-result" onClick={onOpen}><span className={`result-icon ${match.kind}`}>{match.kind === 'image' ? <Image size={18} /> : match.kind === 'pdf-notes' ? <NotebookPen size={18} /> : doc || match.kind === 'pdf' ? <FileText size={18} /> : <StickyNote size={18} />}</span><span><strong>{match.title || match.board.name}</strong><small>{folderPath(folders, match.board.folderId).map(x => x.name).join(' / ') || 'Workspace'} · {kind}</small><p>{match.text.slice(0, 240)}</p></span><ArrowUpRight size={17} /></button>;
 }
 function SettingsDialog({ settings, session, driveStatus, syncStatus, assets, syncing, onSyncNow, onSyncDetails, onClose, onSave, onSignOut, onConnectDrive, onExport, onImport, onImportLocal, onRetryOcr }: { settings: Settings; session: Session; driveStatus: DriveStatus; syncStatus: string; assets: Asset[]; syncing: boolean; onSyncNow: () => Promise<void>; onSyncDetails: () => void; onClose: () => void; onSave: (settings: Settings) => Promise<void>; onSignOut: () => Promise<void>; onConnectDrive: () => Promise<void>; onExport: () => Promise<void>; onImport: (file: File) => Promise<void>; onImportLocal: () => Promise<void>; onRetryOcr: () => Promise<void> }) {
   const [draft, setDraft] = useState(settings); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const [tab, setTab] = useState<'cloud' | 'storage' | 'preferences'>('cloud');

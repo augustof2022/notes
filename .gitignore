@@ -9,3 +9,4 @@ public/ocr/
 *.log
 *.tsbuildinfo
 public/handwriting/
+public/pdfjs/

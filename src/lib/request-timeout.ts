@@ -12,10 +12,21 @@ export async function cloudFetch(input: RequestInfo | URL, init?: RequestInit): 
     const abort = () => controller.abort(signal.reason);
     if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
   }
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, upload ? 90000 : 45000);
+  // Large files (documents) get time to upload on a slow connection: at least 50 KB a second.
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, upload ? Math.max(90000, bodySize(init?.body) / 50) : 45000);
   try { return await fetch(input, { ...init, signal: combined }); }
   catch (error) {
     if (timedOut) throw new Error('The cloud request timed out. Your changes are saved on this device; check your connection and sync again.');
     throw error;
   } finally { clearTimeout(timer); }
+}
+
+function bodySize(body: BodyInit | null | undefined): number {
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return body.size;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    let size = 0;
+    body.forEach(value => { if (typeof value !== 'string') size += value.size; });
+    return size;
+  }
+  return 0;
 }

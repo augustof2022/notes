@@ -3,9 +3,10 @@ import { createPortal, flushSync } from 'react-dom';
 import { CaptureUpdateAction, mutateElement, newElementWith } from '@excalidraw/excalidraw';
 import type { Arrowhead, ExcalidrawArrowElement, ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import { ArrowUp, GitBranch, Link2, MessageCircleQuestion, Plus, Shapes, SlidersHorizontal, Sparkles, Type, X } from 'lucide-react';
+import { ArrowUp, GitBranch, Link2, MessageCircleQuestion, Plus, Shapes, SlidersHorizontal, Sparkles, TextSelect, Type, X } from 'lucide-react';
 import { LEARN_EVENT } from '../lib/explain-scene';
 import { noteText } from '../lib/ask-ai-scene';
+import { PDF_TEXT_EVENT, pageObject } from '../lib/pdf-model';
 import { DIAGRAM_SYSTEMS, DIAGRAM_THEMES, getDiagramNodes, nextNodePosition, readDiagramData, sidePoint, type DiagramSystemId } from '../lib/diagram-model';
 import { attachDiagramEdge, createDiagramEdge, createObjectConnection, createDiagramNode, changeDiagramNodeShape } from '../lib/diagram-scene';
 import { connectionPrimary, connectionTarget, connectionTargetAt, selectedConnectionTargets } from '../lib/connection-targets';
@@ -420,7 +421,9 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   const closeAsk = () => { setAskFor(null); setPrompt(''); root?.querySelector<HTMLElement>('.excalidraw')?.focus(); };
   // The box stays open with the prompt if Ask AI is still busy with another answer.
   const sendAsk = () => { const text = prompt.trim(); if (!text || !learnObject('ask', text)) return; setAskFor(null); setPrompt(''); };
+  const aiPage = aiTarget && pageObject(aiTarget);
   const aiButtons = <>
+    {aiPage && <button className="note-text-ai" aria-label="Select words on this page" title="Select words on the page to copy, highlight, Explain or Ask" onClick={() => root?.dispatchEvent(new CustomEvent(PDF_TEXT_EVENT, { detail: { elementId: aiTarget!.id } }))}><TextSelect size={14} />Select text</button>}
     <button className="note-text-ai is-primary" aria-label="Explain the selected object" title="Explain this object in a new connected note" onClick={() => learnObject('explain')}><Sparkles size={14} />Explain</button>
     <button className="note-text-ai" aria-label="Ask about the selected object" title="Ask your own question about this object" onClick={() => { setPrompt(''); setAskFor(aiTarget?.id || null); }}><MessageCircleQuestion size={14} />Ask</button>
   </>;
@@ -435,7 +438,8 @@ export function DiagramTools({ api, root, onMessage }: { api: ExcalidrawImperati
   useEffect(() => { if (askFor && aiTarget?.id !== askFor) { setAskFor(null); setPrompt(''); } }, [aiTarget?.id]);
   const askTarget = askFor && aiTarget?.id === askFor ? aiTarget : null;
   const askWords = askTarget ? noteText(askTarget, snapshot.elements) : '';
-  const askAbout = askWords ? `“${askWords.length > 60 ? `${askWords.slice(0, 59)}…` : askWords}”` : askTarget?.type === 'image' ? 'this image' : 'this drawing';
+  const askPage = askTarget && pageObject(askTarget);
+  const askAbout = askPage ? `page ${askPage.page} of “${askPage.name.length > 40 ? `${askPage.name.slice(0, 39)}…` : askPage.name}”` : askWords ? `“${askWords.length > 60 ? `${askWords.slice(0, 59)}…` : askWords}”` : askTarget?.type === 'image' ? 'this image' : 'this drawing';
   const askWidth = Math.min(380, (bounds?.width || 400) - 16), askHeight = 128;
   const objectBottom = chosenGeometry && project([chosenGeometry.x, chosenGeometry.y + chosenGeometry.height])[1];
   const askAbove = nodeCenter ? nodeCenter[1] - askHeight - 8 : 0, roomAbove = askAbove >= editorTop + 72;

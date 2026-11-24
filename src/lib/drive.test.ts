@@ -42,6 +42,24 @@ describe('Drive image uploads and downloads', () => {
     profile.resolve(json({ sub: subject }));
     expect(await connection).toBe(true); expect((await download).size).toBe(5); expect(await upload).toBe('uploaded-image');
   });
+  it('uploads files over 5 MB (documents) through a resumable session', async () => {
+    const calls: { url: URL; init?: RequestInit }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = inputUrl(input); calls.push({ url, init });
+      if (url.searchParams.get('upload_id') === 'session-1') return json({ id: 'uploaded-document' });
+      if (url.pathname === '/upload/drive/v3/files' && url.searchParams.get('uploadType') === 'resumable') return new Response(null, { status: 200, headers: { Location: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session-1' } });
+      return basicFetch(input);
+    }));
+    await drive.useGoogleDriveSession(session());
+    const pdf = new Blob([new Uint8Array(5 * 1024 * 1024 + 1)], { type: 'application/pdf' });
+    expect(await drive.uploadDriveImage('pdf-abc', owner, pdf)).toBe('uploaded-document');
+    const start = calls.find(call => call.url.searchParams.get('uploadType') === 'resumable' && !call.url.searchParams.get('upload_id'))!;
+    expect(JSON.parse(String(start.init?.body))).toMatchObject({ name: 'note-pdf-abc.pdf', appProperties: { assetId: 'pdf-abc', owner } });
+    expect(new Headers(start.init?.headers).get('X-Upload-Content-Length')).toBe(String(pdf.size));
+    const put = calls.find(call => call.url.searchParams.get('upload_id') === 'session-1')!;
+    expect(put.init?.method).toBe('PUT'); expect(put.init?.body).toBe(pdf);
+    expect(calls.some(call => call.url.searchParams.get('uploadType') === 'multipart')).toBe(false);
+  });
   it('blocks both image directions for another Note account before any file request', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => basicFetch(input)); vi.stubGlobal('fetch', fetcher);
     await drive.useGoogleDriveSession(session()); const calls = fetcher.mock.calls.length;
