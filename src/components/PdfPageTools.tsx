@@ -6,7 +6,7 @@ import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/t
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArrowLeft, ArrowUp, Check, ChevronLeft, ChevronRight, Copy, Highlighter, Loader2, MessageCircleQuestion, Sparkles, TextSelect, X } from 'lucide-react';
 import { contentFingerprint } from '../lib/canvas-signature';
-import { drawTextLayer } from '../lib/pdf-engine';
+import { bindTextSelection, drawTextLayer } from '../lib/pdf-engine';
 import { loadPdf } from '../lib/pdf-store';
 import { attachedPage, PDF_TEXT_EVENT, HIGHLIGHT_COLORS, highlightData, mergeLineRects, pageObject, type HighlightColor, type HighlightData } from '../lib/pdf-model';
 import { cleanSelection, LEARN_EVENT, type LearnSelection } from '../lib/explain-scene';
@@ -155,20 +155,19 @@ function TextMode({ api, root, scope, client, elementId, onDone, onMessage }: { 
   }, [api, elementId, root]);
   useEffect(() => {
     if (!page || !layer.current) return;
-    let alive = true;
+    let alive = true, unbind = () => {};
     loadPdf(client, scope, page.fileId).then(doc => drawTextLayer(doc, page.page, layer.current!, page.size[0] * 2))
-      .then(() => { if (!alive || !layer.current) return; layer.current.dataset.width = String(page.size[0] * 2); const element = api.getSceneElements().find(item => item.id === elementId); if (element) layer.current.style.transform = `scale(${element.width / (page.size[0] * 2)})`; setReady(true); outer.current?.focus({ preventScroll: true }); })
+      .then(() => { if (!alive || !layer.current) return; unbind = bindTextSelection(layer.current); layer.current.dataset.width = String(page.size[0] * 2); const element = api.getSceneElements().find(item => item.id === elementId); if (element) layer.current.style.transform = `scale(${element.width / (page.size[0] * 2)})`; setReady(true); outer.current?.focus({ preventScroll: true }); })
       .catch(error => { if (alive) { onMessage(error instanceof Error ? error.message : 'The words on this page could not be read.'); done.current(); } });
-    return () => { alive = false; };
+    return () => { alive = false; unbind(); };
   }, [elementId]);
   useEffect(() => {
     const read = () => {
       const selection = document.getSelection();
       if (!selection || selection.isCollapsed || !layer.current || !selection.rangeCount || !layer.current.contains(selection.anchorNode)) { if (!asking) setPicked(null); return; }
-      const text = selection.toString().replace(/\s+/g, ' ').trim();
-      if (!text) { setPicked(null); return; }
       const range = selection.getRangeAt(0), state = api.getAppState(), zoom = state.zoom.value;
-      const rects = Array.from(range.getClientRects()).filter(rect => !(rect.width > 0 && rect.height > layer.current!.getBoundingClientRect().height * 0.5));
+      const { text, rects } = selectedWords(range, layer.current);
+      if (!text) { setPicked(null); return; }
       const scene = mergeLineRects(rects.map(rect => ({ left: (rect.left - state.offsetLeft) / zoom - state.scrollX, top: (rect.top - state.offsetTop) / zoom - state.scrollY, width: rect.width / zoom, height: rect.height / zoom })), 1.2);
       const box = range.getBoundingClientRect(), bounds = root!.getBoundingClientRect();
       const below = box.top - bounds.top < 120;
@@ -251,4 +250,25 @@ function TextMode({ api, root, scope, client, elementId, onDone, onMessage }: { 
       </>}
     </div>}
   </>, host);
+}
+
+/**
+ * The words a selection covers on a page and their boxes, read from the
+ * text itself: element boxes a range also reports (whole lines, the
+ * selection cover) never become part of a highlight.
+ */
+function selectedWords(range: Range, layer: HTMLElement) {
+  const rects: DOMRect[] = [], words: string[] = [];
+  const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node) || (node.parentElement && node.parentElement.closest('.endOfContent'))) continue;
+    const part = document.createRange(); part.selectNodeContents(node);
+    if (node === range.startContainer) part.setStart(node, range.startOffset);
+    if (node === range.endContainer) part.setEnd(node, range.endOffset);
+    const value = part.toString();
+    if (!value.trim()) { if (value) words.push(' '); continue; }
+    words.push(value + (node.parentElement?.nextElementSibling?.tagName === 'BR' ? ' ' : ''));
+    rects.push(...Array.from(part.getClientRects()).filter(rect => rect.width > 0.5 && rect.height > 0.5));
+  }
+  return { text: words.join('').replace(/\s+/g, ' ').trim(), rects };
 }

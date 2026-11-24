@@ -144,3 +144,77 @@ export async function drawTextLayer(doc: PDFDocumentProxy, pageNumber: number, c
   const end = document.createElement('div'); end.className = 'endOfContent'; container.append(end);
   return layer;
 }
+
+/**
+ * Keeps a drag over a page's words from jumping to select whole blocks.
+ * Between words the pointer is over the layer itself, which browsers treat
+ * as "the start or end of everything"; while selecting, a cover
+ * (.endOfContent) sits under the words so gaps hit it instead, and on older
+ * Chromium it follows the selection's moving end. Ported from pdf.js's
+ * TextLayerBuilder (Apache-2.0). Returns a function that unbinds the layer.
+ */
+const selectionLayers = new Map<HTMLElement, HTMLElement>();
+let selectionListeners: AbortController | null = null;
+export function bindTextSelection(layer: HTMLElement): () => void {
+  const end = layer.querySelector<HTMLElement>(':scope > .endOfContent');
+  if (!end) return () => {};
+  const start = () => layer.classList.add('selecting');
+  layer.addEventListener('pointerdown', start);
+  selectionLayers.set(layer, end);
+  enableSelectionListeners();
+  return () => {
+    layer.removeEventListener('pointerdown', start);
+    resetSelectionLayer(end, layer);
+    selectionLayers.delete(layer);
+    if (!selectionLayers.size) { selectionListeners?.abort(); selectionListeners = null; }
+  };
+}
+function resetSelectionLayer(end: HTMLElement, layer: HTMLElement) {
+  layer.append(end); end.style.width = ''; end.style.height = ''; end.style.userSelect = '';
+  layer.classList.remove('selecting');
+}
+function enableSelectionListeners() {
+  if (selectionListeners) return;
+  selectionListeners = new AbortController();
+  const { signal } = selectionListeners;
+  const resetAll = () => selectionLayers.forEach(resetSelectionLayer);
+  let pointerDown = false, modern: boolean | undefined, previous: Range | null = null;
+  document.addEventListener('pointerdown', () => { pointerDown = true; }, { signal, capture: true });
+  document.addEventListener('pointerup', () => { pointerDown = false; resetAll(); }, { signal });
+  window.addEventListener('blur', () => { pointerDown = false; resetAll(); }, { signal });
+  document.addEventListener('keyup', () => { if (!pointerDown) resetAll(); }, { signal });
+  document.addEventListener('selectionchange', () => {
+    const selection = document.getSelection();
+    if (!selection?.rangeCount) { resetAll(); return; }
+    const active = new Set<HTMLElement>();
+    for (let index = 0; index < selection.rangeCount; index++) {
+      const range = selection.getRangeAt(index);
+      if (range.collapsed && !pointerDown) continue;
+      for (const layer of selectionLayers.keys()) if (range.intersectsNode(layer)) active.add(layer);
+    }
+    for (const [layer, end] of selectionLayers) { if (active.has(layer)) layer.classList.add('selecting'); else resetSelectionLayer(end, layer); }
+    // Firefox and Chromium 148+ stop at the cover on their own.
+    if (modern === undefined) {
+      const chromium = /\bChrome\/(\d+)\b/.exec(navigator.userAgent)?.[1];
+      modern = 'MozAppearance' in document.documentElement.style || (!!chromium && Number(chromium) >= 148);
+    }
+    if (modern || !active.size) return;
+    const range = selection.getRangeAt(0);
+    const moveStart = !!previous && (range.compareBoundaryPoints(Range.END_TO_END, previous) === 0 || range.compareBoundaryPoints(Range.START_TO_END, previous) === 0);
+    let anchor: Node | null = moveStart ? range.startContainer : range.endContainer;
+    if (anchor?.nodeType === Node.TEXT_NODE) anchor = anchor.parentNode;
+    if (!moveStart && range.endOffset === 0 && anchor) {
+      do {
+        while (anchor && !anchor.previousSibling) anchor = anchor.parentNode;
+        anchor = anchor?.previousSibling || null;
+      } while (anchor && !anchor.childNodes.length);
+    }
+    const layer = (anchor as Element | null)?.parentElement?.closest<HTMLElement>('.pdf-text-layer');
+    const end = layer && selectionLayers.get(layer);
+    if (anchor && layer && end && anchor.parentElement) {
+      end.style.width = `${layer.offsetWidth}px`; end.style.height = `${layer.offsetHeight}px`; end.style.userSelect = 'text';
+      anchor.parentElement.insertBefore(end, moveStart ? anchor : anchor.nextSibling);
+    }
+    previous = range.cloneRange();
+  }, { signal });
+}

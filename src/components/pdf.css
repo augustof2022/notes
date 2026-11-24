@@ -16,6 +16,9 @@
 .pdf-page-input{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .pdf-toolbar .pdf-page-input input[inputmode]{width:44px;height:30px;padding:0;text-align:center;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:550 12px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums}
 .pdf-page-input input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.pdf-annotate-current{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:8px;background:#7760d5;color:#fff;font:550 12px 'DM Sans',sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums;box-shadow:0 3px 6px #7760d51b;transition:background .15s}
+.pdf-annotate-current:hover{background:#6651c4}
+.pdf-annotate-current b{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ffffff33;font-size:10px;font-weight:650}
 .pdf-annotated{display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:11px;color:var(--muted)}
 .pdf-annotated>svg{color:var(--accent)}
 .pdf-annotated>span{margin-right:2px;white-space:nowrap}
@@ -51,13 +54,13 @@
 .pdf-marks i{position:absolute;opacity:.42;border-radius:1px}
 
 /* pdf.js text layer: transparent words over the picture, selectable. */
-.pdf-text-layer{position:absolute;inset:0;overflow:clip;line-height:1;text-align:initial;transform-origin:0 0;forced-color-adjust:none;--min-font-size:1;--text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size));--min-font-size-inv:calc(1 / var(--min-font-size));z-index:1}
+.pdf-text-layer{position:absolute;inset:0;overflow:clip;user-select:none;-webkit-user-select:none;line-height:1;text-align:initial;transform-origin:0 0;forced-color-adjust:none;--min-font-size:1;--text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size));--min-font-size-inv:calc(1 / var(--min-font-size));z-index:1}
 .pdf-text-layer :is(span,br){color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0;user-select:text;-webkit-user-select:text}
-.pdf-text-layer>:not(.markedContent),.pdf-text-layer .markedContent span:not(.markedContent){--font-height:0;font-size:calc(var(--text-scale-factor) * var(--font-height));--scale-x:1;--rotate:0deg;transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv))}
+.pdf-text-layer>:not(.markedContent),.pdf-text-layer .markedContent span:not(.markedContent){z-index:1;--font-height:0;font-size:calc(var(--text-scale-factor) * var(--font-height));--scale-x:1;--rotate:0deg;transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv))}
 .pdf-text-layer .markedContent{display:contents}
 .pdf-text-layer ::selection{background:color-mix(in srgb,var(--accent) 32%,transparent);color:transparent}
 .pdf-text-layer br::selection{background:transparent}
-.pdf-text-layer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:0;cursor:default;user-select:none}
+.pdf-text-layer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:0;cursor:default;user-select:none;-webkit-user-select:none;transform:none}
 .pdf-text-layer.selecting .endOfContent{top:0}
 .pdf-text-layer span.pdf-hit{background:var(--hit);border-radius:2px;box-shadow:0 0 0 1px var(--hit)}
 
@@ -105,7 +108,7 @@
 .pdf-select-send:disabled{opacity:.4}
 
 /* Selecting words on a page picture */
-.pdf-text-mode{position:absolute;left:0;top:0;z-index:5;transform-origin:0 0;outline:none;cursor:text;user-select:text;-webkit-user-select:text;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);border-radius:1px;background:color-mix(in srgb,var(--accent) 4%,transparent);opacity:0;transition:opacity .18s}
+.pdf-text-mode{position:absolute;left:0;top:0;z-index:5;transform-origin:0 0;outline:none;cursor:text;user-select:none;-webkit-user-select:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);border-radius:1px;background:color-mix(in srgb,var(--accent) 4%,transparent);opacity:0;transition:opacity .18s}
 .pdf-text-mode.is-ready{opacity:1}
 .pdf-text-done{position:absolute;z-index:8;left:50%;top:76px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:5px 5px 5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);box-shadow:var(--shadow);font-size:12px;color:var(--ink);white-space:nowrap;animation:pdf-rise .2s cubic-bezier(.2,.8,.2,1)}
 .pdf-text-done>svg{color:var(--accent)}
@@ -199,6 +202,7 @@
 @media(max-width:760px){
   .pdf-toolbar{gap:6px;padding:6px 10px}
   .pdf-segmented button span,.pdf-annotated>span,.pdf-tile-size span{display:none}
+  .pdf-annotate-current{height:36px;padding:0 11px}
   .pdf-annotated button:nth-of-type(n+4),.pdf-annotated-more{display:none}
   .pdf-results{position:absolute;inset:auto 0 0 0;width:auto;max-height:45%;border-left:0;border-top:1px solid var(--line);box-shadow:0 -8px 24px #2a24371a;z-index:3}
   .pdf-toolbar .pdf-search.is-open input[type=search]{width:min(180px,45vw)}

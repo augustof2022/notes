@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { ChevronLeft, ChevronRight, LayoutGrid, Loader2, NotebookPen, RefreshCw, Rows3, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Board } from '../types';
-import { drawPage, drawTextLayer, pageThumb } from '../lib/pdf-engine';
+import { bindTextSelection, drawPage, drawTextLayer, pageThumb } from '../lib/pdf-engine';
 import { loadPdf, pdfTexts } from '../lib/pdf-store';
 import { excerpt, matchesAll, pageBoardsOf, pageHighlights, pageNotes, pageSize, pdfDoc, searchTerms, type PageNotes } from '../lib/pdf-model';
 import './pdf.css';
@@ -197,6 +197,7 @@ export function PdfReader({ board, boards, scope, client, initialPage, onAnnotat
         <PageInput page={current} pages={meta.pages} onGo={goTo} />
         <button className="icon-button" aria-label="Next page" disabled={current >= meta.pages} onClick={() => goTo(current + 1, true)}><ChevronRight size={16} /></button>
       </div>
+      <AnnotateCurrent page={current} notes={notes.get(current)} onOpen={() => onAnnotate(current)} />
       {annotated.length > 0 && <div className="pdf-annotated" role="group" aria-label="Pages with notes">
         <NotebookPen size={14} aria-hidden /><span>Notes on</span>
         {annotated.slice(0, 8).map(page => <button key={page} aria-current={page === current ? 'true' : undefined} onClick={() => goTo(page, true)} title={`Go to page ${page}`}>{page}</button>)}
@@ -246,6 +247,13 @@ function Mark({ text, terms }: { text: string; terms: readonly string[] }) {
   return <>{text.split(pattern).map((part, index) => index % 2 ? <mark key={index}>{part}</mark> : part)}</>;
 }
 
+/** The toolbar's main action: open the board of the page being read. Always in view while scrolling. */
+function AnnotateCurrent({ page, notes, onOpen }: { page: number; notes?: PageNotes; onOpen: () => void }) {
+  const count = notes ? notes.notes + notes.highlights : 0;
+  return <button className={`pdf-annotate-current${count ? ' has-notes' : ''}`} onClick={onOpen} title={count ? `Open page ${page}'s board (${count} note${count === 1 ? '' : 's'} and highlight${count === 1 ? '' : 's'})` : `Annotate page ${page} on its own board`}>
+    <NotebookPen size={15} aria-hidden /><span>{count ? `Open page ${page} notes` : `Annotate page ${page}`}</span>{count > 0 && <b aria-hidden>{count}</b>}
+  </button>;
+}
 function NotesBadge({ notes, onOpen, compact = false }: { notes?: PageNotes; onOpen: () => void; compact?: boolean }) {
   const label = notes ? [notes.notes && `${notes.notes} note${notes.notes === 1 ? '' : 's'}`, notes.highlights && `${notes.highlights} highlight${notes.highlights === 1 ? '' : 's'}`].filter(Boolean).join(' · ') : '';
   return notes ? <button className="pdf-notes-badge" onClick={onOpen} title="Open this page's board"><NotebookPen size={13} aria-hidden /><span>{compact ? (notes.notes + notes.highlights) : label}</span></button>
@@ -263,17 +271,17 @@ function PageView({ doc, page, top, width, height, renderWidth, terms, notes, on
   }, [doc, page, renderWidth]);
   useEffect(() => {
     if (!text.current || renderWidth < 1) return;
-    let alive = true;
+    let alive = true, unbind = () => {};
     // Selectable words come a moment after the picture, so scrolling stays smooth.
-    const timer = setTimeout(() => { void drawTextLayer(doc, page, text.current!, renderWidth).then(() => { if (alive) { setTextWidth(renderWidth); markTerms(text.current!, terms); } }).catch(() => {}); }, 120);
-    return () => { alive = false; clearTimeout(timer); };
+    const timer = setTimeout(() => { void drawTextLayer(doc, page, text.current!, renderWidth).then(() => { if (!alive || !text.current) return; unbind = bindTextSelection(text.current); setTextWidth(renderWidth); markTerms(text.current, terms); }).catch(() => {}); }, 120);
+    return () => { alive = false; clearTimeout(timer); unbind(); };
   }, [doc, page, renderWidth]);
   useEffect(() => { if (text.current && textWidth) markTerms(text.current, terms); }, [terms, textWidth]);
   return <div className={`pdf-page${drawn ? ' is-drawn' : ''}`} style={{ top, width, height }} data-page={page}>
     <canvas ref={canvas} aria-hidden />
     {!!notes?.marks?.length && <div className="pdf-marks" aria-hidden>{notes.marks.map(mark => <i key={mark.id} style={{ left: `${mark.left * 100}%`, top: `${mark.top * 100}%`, width: `${mark.width * 100}%`, height: `${mark.height * 100}%`, background: mark.fill }} />)}</div>}
     <div ref={text} className="textLayer pdf-text-layer" style={{ transform: textWidth ? `scale(${width / textWidth})` : undefined }} />
-    <div className="pdf-page-actions"><NotesBadge notes={notes} onOpen={onAnnotate} /></div>
+    {notes && <div className="pdf-page-actions"><NotesBadge notes={notes} onOpen={onAnnotate} /></div>}
     <span className="pdf-page-number" aria-hidden>{page}</span>
   </div>;
 }
