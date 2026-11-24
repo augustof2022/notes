@@ -1,5 +1,11 @@
 /** Tried in order: a model with no free allowance for this key falls through to the next. */
-export const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+/**
+ * Tried in order; a model that is busy or out of free quota is rested and
+ * the next one asked. The aliases follow Google's newest Flash and Flash-Lite;
+ * the pinned 3.x models back them up (Gemini 2.5 is rerouted from
+ * 1 December 2026 and new keys may not reach it). Checked 2026-11-24.
+ */
+export const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite'];
 export const GEMINI_MODEL = GEMINI_MODELS[0];
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
