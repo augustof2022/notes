@@ -30,7 +30,15 @@ const noFree = { error: { code: 429, message: 'You exceeded your current quota. 
 it('falls through to a model that has a free allowance for this key', async () => {
   const fetcher = vi.fn((url: string) => url.includes('/gemini-flash-latest:') ? reply(429, noFree) : reply(200, answer)) as unknown as typeof fetch;
   const result = await askGemini('KEY', request, { fetcher });
-  expect(result).toMatchObject({ model: 'gemini-2.5-flash', searched: true });
+  expect(result).toMatchObject({ model: 'gemini-3.8-flash', searched: true });
+});
+
+it('asks current 3.x Flash models, never the retiring 2.x ones', async () => {
+  const { GEMINI_MODELS } = await import('./gemini');
+  expect(GEMINI_MODELS).toEqual(['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']);
+  expect(GEMINI_MODELS.some(model => /gemini-[12]\./.test(model))).toBe(false);
+  expect(thinkingConfig('gemini-3.8-flash', true)).toEqual({ thinkingLevel: 'minimal' });
+  expect(thinkingConfig('gemini-3.5-flash-lite', false)).toEqual({ thinkingLevel: 'low' });
 });
 
 it('tells per-minute limits, daily limits, and no free allowance apart, keeping Google’s message', async () => {
@@ -145,14 +153,14 @@ it('remembers a route that hit its limit, so the next question goes straight to 
   const perMinute = { error: { code: 429, message: 'Quota exceeded. PerMinute', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }] } };
   const fetcher = vi.fn((url: string) => url.includes('/gemini-flash-latest:') ? reply(429, perMinute) : reply(200, answer)) as unknown as typeof fetch;
   const calls = () => (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
-  expect(await askGemini('KEY', request, { fetcher, now: () => clock })).toMatchObject({ model: 'gemini-2.5-flash', searched: true });
+  expect(await askGemini('KEY', request, { fetcher, now: () => clock })).toMatchObject({ model: 'gemini-3.8-flash', searched: true });
   expect(calls()).toBe(3);
   await askGemini('KEY', request, { fetcher, now: () => clock });
   expect(calls()).toBe(4);
   // After the wait Google asked for, the first model gets its turn again (behind the last one that answered).
   clock += 31_000;
-  expect(routeOrder(['gemini-flash-latest', 'gemini-2.5-flash'], [true, false], clock)[0]).toEqual(['gemini-2.5-flash', true]);
-  expect(routeOrder(['gemini-flash-latest', 'gemini-2.5-flash'], [true, false], clock)).toHaveLength(4);
+  expect(routeOrder(['gemini-flash-latest', 'gemini-3.8-flash'], [true, false], clock)[0]).toEqual(['gemini-3.8-flash', true]);
+  expect(routeOrder(['gemini-flash-latest', 'gemini-3.8-flash'], [true, false], clock)).toHaveLength(4);
 });
 
 it('moves to the next model when one sends no words in time', async () => {
@@ -160,7 +168,7 @@ it('moves to the next model when one sends no words in time', async () => {
     ? new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))))
     : reply(200, answer)) as unknown as typeof fetch;
   const result = await askGemini('KEY', { ...request, mode: 'explain' }, { fetcher, firstByteMs: 20 });
-  expect(result.model).toBe('gemini-2.5-flash');
+  expect(result.model).toBe('gemini-3.8-flash');
 });
 
 it('still stops at once when the person cancels', async () => {
@@ -177,5 +185,5 @@ it('waits as long as it takes once a try was too slow, so a slow network still g
   const later = () => new Promise<Response>(resolve => setTimeout(() => resolve(new Response(JSON.stringify(answer), { status: 200 })), 60));
   const fetcher = vi.fn((url: string, init: RequestInit) => url.includes('/gemini-flash-latest:') ? hang(init) : later()) as unknown as typeof fetch;
   const result = await askGemini('KEY', { ...request, mode: 'explain' }, { fetcher, firstByteMs: 20 });
-  expect(result.model).toBe('gemini-2.5-flash');
+  expect(result.model).toBe('gemini-3.8-flash');
 });
