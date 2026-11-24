@@ -19,8 +19,8 @@ export default defineConfig({
     },
     workbox: {
       maximumFileSizeToCacheInBytes: 8000000,
-      globPatterns: ['**/*.{js,css,html,svg,png,woff2,wasm,gz}'],
-      globIgnores: ['**/setup.html', '**/about.html', '**/updates.html', '**/privacy.html', '**/terms.html', '**/handwriting/**', '**/ort-*.wasm'],
+      globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,wasm,gz}'],
+      globIgnores: ['**/setup.html', '**/about.html', '**/updates.html', '**/privacy.html', '**/terms.html', '**/handwriting/**', '**/ort-*.wasm', '**/pdfjs/**'],
       skipWaiting: true,
       clientsClaim: true,
       navigateFallback: 'index.html',

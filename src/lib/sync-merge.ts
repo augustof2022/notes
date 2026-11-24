@@ -23,9 +23,11 @@ function elementContent(element: unknown) {
   if (content.type === 'image') delete content.status;
   return content;
 }
+/** Board settings every device shares; the rest of the app state (view, tools) belongs to each device. */
+const SHARED_STATE = ['viewBackgroundColor', 'notePdf', 'notePdfPage', 'noteReferences'] as const;
 function sharedState(value: unknown) {
   const state = value as Board['appState'] | undefined;
-  return { viewBackgroundColor: state?.viewBackgroundColor };
+  return Object.fromEntries(SHARED_STATE.map(key => [key, state?.[key]]));
 }
 function content(data: SyncData): SyncData {
   if (!('elements' in data)) return data;
@@ -39,7 +41,7 @@ export function boardContentChanged(before: Pick<Board, 'elements' | 'appState'>
 }
 export function withLocalView<T extends Board | Folder>(remote: T, local?: T): T {
   if (!('elements' in remote) || !local || !('elements' in local)) return remote;
-  return { ...remote, appState: { ...remote.appState, ...local.appState, viewBackgroundColor: remote.appState.viewBackgroundColor } };
+  return { ...remote, appState: { ...remote.appState, ...local.appState, ...sharedState(remote.appState) } };
 }
 
 function mergeValue(base: unknown, local: unknown, cloud: unknown, compare = equal): { value?: unknown; conflict: boolean } {

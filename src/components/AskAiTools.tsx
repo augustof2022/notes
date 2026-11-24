@@ -8,7 +8,8 @@ import { ChevronDown, ExternalLink, KeyRound, Loader2, Sparkles, X } from 'lucid
 import { Modal } from './Modal';
 import { deleteSealedAiKey, forgetAiKeyLock, loadSealedAiKey, geminiKeyProblem, openAiKey, rememberAiKeyLock, rememberedAiKeyLock, saveSealedAiKey, sealAiKey, unlockAiKey, WrongPassphraseError, type SealedAiKey } from '../lib/ai-key';
 import { askGemini, forgetRoutes, GeminiError, googleAiModeUrl, verifyGeminiKey, type AskRequest } from '../lib/gemini';
-import { answerMarkdown, askSelection, isLearnNote, learnPage, noteText, objectContent, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { answerMarkdown, askSelection, documentAnchor, documentContext, isLearnNote, learnPage, noteText, objectContent, threadContext, type LearnData } from '../lib/ask-ai-scene';
+import { pageObject } from '../lib/pdf-model';
 import type { AskImage } from '../lib/gemini';
 import { cleanSelection, LEARN_EDGE, LEARN_EVENT, LEARN_NODE, LEARN_SOURCE_LINE, learnBase, learnEdgeStyle, learnQuestion, placeRightOf, selectionNodeSize, selectionNodeText, type LearnSelection } from '../lib/explain-scene';
 import { connectionTarget } from '../lib/connection-targets';
@@ -77,9 +78,13 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
   async function learnRequest(ask: LearnSelection): Promise<Pending | null> {
     const elements = api.getSceneElements(), target = connectionTarget(elements, ask.sourceId), sourceId = target?.element.id || ask.sourceId;
     const question = ask.question?.trim(), instruction = ask.kind === 'explain' ? readAiInstruction() : undefined;
+    const fromDocument = documentContext(elements, target?.element);
     if (!ask.object) {
       const learn = { ...ask, sourceId, selection: cleanSelection(ask.selection), question };
-      return { request: { question: learnQuestion(learn), context: threadContext(elements, sourceId), images: [], instruction, mode: ask.kind, focus: learn.selection }, anchorId: sourceId, parentId: sourceId, learn };
+      const context = threadContext(elements, sourceId);
+      // The highlight's own words are the selection; the page they are on is the context.
+      if (fromDocument) { if (context.at(-1) === learn.selection.slice(0, 1500)) context.pop(); context.unshift(fromDocument); }
+      return { request: { question: learnQuestion(learn), context, images: [], instruction, mode: ask.kind, focus: learn.selection }, anchorId: sourceId, parentId: sourceId, learn };
     }
     if (!target) return null;
     const groupId = target.groupId;
@@ -90,7 +95,10 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     // The object's own words are what it is about, so they are not repeated as context.
     const context = threadContext(elements, sourceId);
     if (!learnPage(target.element) && context.at(-1) === noteText(target.element, elements).slice(0, 1500)) context.pop();
-    const chip = content.text ? undefined : content.kind === 'image' ? 'Picture' : 'Drawing';
+    const page = pageObject(target.element);
+    if (fromDocument && !page) context.unshift(fromDocument);
+    else if (page) context.unshift(`The person is reading the document “${page.name}”; this is page ${page.page}. Its picture and its words are attached.`);
+    const chip = page ? `Page ${page.page} · ${page.name.length > 40 ? `${page.name.slice(0, 39)}…` : page.name}` : content.text ? undefined : content.kind === 'image' ? 'Picture' : 'Drawing';
     const learn = { ...ask, sourceId, selection: content.text, question, chip };
     return { request: { question: learnQuestion(learn), context, images, instruction, mode: ask.kind, focus: content.text, picture: !content.text }, anchorId: sourceId, parentId: sourceId, learn };
   }
@@ -170,7 +178,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const label = (source.element.type === 'text' ? source.element : elements.find(item => item.type === 'text' && item.containerId === source.element.id)) as ExcalidrawTextElement | undefined;
     const base = learnBase({ fontSize: label?.fontSize, customData: source.element.customData }), k = base / 20;
     const text = selectionNodeText(learn.selection, learn.kind === 'ask' ? learn.question : undefined, learn.chip);
-    const size = selectionNodeSize(text, base), place = placeRightOf(source.geometry, size, elements, LEARN_NODE.gapSource * k, LEARN_NODE.gapStack * k);
+    const size = selectionNodeSize(text, base), place = placeRightOf(documentAnchor(elements, source.element) || source.geometry, size, elements, LEARN_NODE.gapSource * k, LEARN_NODE.gapStack * k);
     const created = convertToExcalidrawElements([{ type: 'rectangle', ...place, ...size, strokeColor: LEARN_NODE.stroke, backgroundColor: LEARN_NODE.fill, fillStyle: 'solid', strokeWidth: LEARN_NODE.chipStrokeWidth,
       roughness: 0, roundness: LEARN_NODE.roundness, customData: { noteAi: { question: text.slice(0, 500), at: new Date().toISOString(), parentId: source.element.id, role: 'selection', kind: learn.kind, selection: learn.selection, base } satisfies LearnData },
       label: { text, fontSize: base, fontFamily: label?.fontFamily || state.currentItemFontFamily, strokeColor: LEARN_NODE.text, textAlign: 'left', verticalAlign: 'middle' } }]);
@@ -192,7 +200,7 @@ export function AskAiTools({ api, root, client, owner, onMessage }: { api: Excal
     const text = { ...created, width: wrap, customData: { noteAi: { provider: 'gemini', model, question: next.request.question.slice(0, 500), at: new Date().toISOString(), role: 'answer', kind: learn.kind, base, ...(from ? { parentId: from.element.id } : {}) } satisfies LearnData } } as ExcalidrawTextElement;
     const ink = (label && readRichText(label)?.color) || (label && label.strokeColor !== 'transparent' ? label.strokeColor : '') || state.currentItemStrokeColor;
     applyRichText(text, doc, ink, true, { wrap, width: wrap, fontSize });
-    const place = from ? placeRightOf(from.geometry, { width: text.width, height: text.height }, elements, LEARN_NODE.gapAnswer * k, LEARN_NODE.gapStack * k) : { x: state.width / 2 / state.zoom.value - state.scrollX - 200, y: state.height / 2 / state.zoom.value - state.scrollY - 40 };
+    const place = from ? placeRightOf(documentAnchor(elements, from.element) || from.geometry, { width: text.width, height: text.height }, elements, LEARN_NODE.gapAnswer * k, LEARN_NODE.gapStack * k) : { x: state.width / 2 / state.zoom.value - state.scrollX - 200, y: state.height / 2 / state.zoom.value - state.scrollY - 40 };
     mutateElement(text, place, false);
     if (from) link(from.element.id, text.id, [text], LEARN_EDGE, CaptureUpdateAction.IMMEDIATELY); else api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), text], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     api.updateScene({ appState: { selectedElementIds: { [text.id]: true }, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });

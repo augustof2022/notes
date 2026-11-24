@@ -15,8 +15,11 @@ await cp('supabase/repair-creation-dates.sql', join(dest, 'repair-creation-dates
 await cp('supabase/enable-permanent-trash.sql', join(dest, 'enable-permanent-trash.sql'));
 await cp('supabase/enable-drive-refresh.sql', join(dest, 'enable-drive-refresh.sql'));
 await cp('supabase/enable-ask-ai.sql', join(dest, 'enable-ask-ai.sql'));
+await cp('supabase/enable-documents.sql', join(dest, 'enable-documents.sql'));
+// pdf.js loads these on demand: character maps, the 14 standard fonts, image decoders and colour profiles.
+for (const folder of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) await cp(join('node_modules/pdfjs-dist', folder), join(dest, 'pdfjs', folder), { recursive: true });
 await mkdir(join(dest, 'handwriting'), { recursive: true });
 for (const file of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.jsep.wasm', 'ort-wasm-simd-threaded.jsep.mjs']) {
   await cp(join('node_modules/onnxruntime-web/dist', file), join(dest, 'handwriting', file));
 }
-console.log('Local fonts and English OCR assets ready.');
+console.log('Local fonts, English OCR and PDF reader assets ready.');

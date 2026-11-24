@@ -1,6 +1,7 @@
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { BinaryFiles } from '@excalidraw/excalidraw/types';
 import type { AskAnswer, AskImage } from './gemini';
+import { highlightData, pageObject } from './pdf-model';
 
 export const ASK_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
 const MAX_IMAGES = 3, MAX_IMAGE_BASE64 = 6 * 1024 * 1024;
@@ -39,7 +40,11 @@ export const MAX_OBJECT_TEXT = 4000;
  */
 export function objectContent(elements: readonly ExcalidrawElement[], members: readonly ExcalidrawElement[], files: BinaryFiles): ObjectContent {
   const ids = new Set(members.map(element => element.id));
+  const seen = new Set<string>();
   const words = [...members].sort((a, b) => a.y - b.y || a.x - b.x).flatMap(element => {
+    // Highlights and document pages carry their words (each line of a highlight carries all of them).
+    const known = highlightData(element)?.text || pageObject(element)?.text;
+    if (known !== undefined) { if (!known.trim() || seen.has(known)) return []; seen.add(known); return [known.trim()]; }
     const label = element.type === 'text' ? element : elements.find(item => item.type === 'text' && !item.isDeleted && item.containerId === element.id && !ids.has(item.id));
     return label?.type === 'text' && (label.originalText || label.text).trim() ? [(label.originalText || label.text).trim()] : [];
   });
@@ -85,6 +90,8 @@ export const isLearnNote = (element: ExcalidrawElement | undefined) => !!element
 /** The words in a note: its own text, or the text inside a shape. */
 export function noteText(element: ExcalidrawElement, elements: readonly ExcalidrawElement[] = []) {
   if (element.type === 'text') return (element.originalText || element.text).trim();
+  const known = highlightData(element)?.text ?? pageObject(element)?.text;
+  if (known !== undefined) return known.trim();
   const label = elements.find(item => item.type === 'text' && !item.isDeleted && item.containerId === element.id);
   return label?.type === 'text' ? (label.originalText || label.text).trim() : '';
 }
@@ -108,4 +115,22 @@ export function threadContext(elements: readonly ExcalidrawElement[], id: string
   if (page) context.push(`The page the person is reading: ${page.title} (${page.url})${page.selection ? `\nThey selected: ${page.selection.slice(0, 1500)}` : ''}\n\n${page.text.slice(0, 12000)}`);
   for (const element of path) if (!learnPage(element)) context.push(noteText(element, elements).slice(0, 1500));
   return context.filter(Boolean);
+}
+
+/**
+ * For words on a document page (a highlight) or a whole page: the page they
+ * are on, so Explain and Ask answer in the sense of that document.
+ */
+export function documentContext(elements: readonly ExcalidrawElement[], element: ExcalidrawElement | undefined): string | null {
+  const highlight = highlightData(element);
+  const page = pageObject(highlight ? elements.find(item => item.id === highlight.pageId) : element);
+  if (!page) return null;
+  return `The person is reading the document “${page.name}”, page ${page.page}.${page.text.trim() ? `\n\nThe words on that page:\n${page.text.slice(0, 8000)}` : ''}`;
+}
+/** Where answers about words on a page go: beside the page, level with the words, instead of over the page. */
+export function documentAnchor(elements: readonly ExcalidrawElement[], element: ExcalidrawElement | undefined) {
+  const highlight = highlightData(element);
+  const page = highlight && elements.find(item => item.id === highlight.pageId && !item.isDeleted);
+  if (!page || !element) return null;
+  return { x: page.x, y: element.y, width: page.width };
 }

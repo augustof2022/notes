@@ -36,6 +36,9 @@ import { useBoardImages } from './useBoardImages';
 import { boardImageIds, type BoardImageState } from '../lib/board-images';
 import { contentFingerprint, elementsSignature, sceneSignature } from '../lib/canvas-signature';
 import { boardContentChanged, canvasSaveAnchor, reconcileCanvasSave } from '../lib/sync-merge';
+import { PdfPageTools, type PageBoardNav } from './PdfPageTools';
+import { PdfReferences } from './PdfReferences';
+import { pdfPageRef } from '../lib/pdf-model';
 
 export interface CanvasHandle {
   flush: () => Promise<void>;
@@ -53,7 +56,11 @@ function cleanAppState(state: AppState): Board['appState'] {
     currentItemStrokeWidth: state.currentItemStrokeWidth, currentItemStrokeColor: state.currentItemStrokeColor, currentItemBackgroundColor: state.currentItemBackgroundColor, currentItemFontSize: state.currentItemFontSize,
     gridStep: state.gridStep, ...restoreSnapping(state) };
 }
-export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; onImageState: (state: BoardImageState) => void; jumpId?: string }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, onImageState, jumpId }, ref) {
+/** Document settings the canvas does not know about, kept on every save. */
+function documentState(board: Board, references: string[]): Partial<Board['appState']> {
+  return { ...(board.appState.notePdfPage ? { notePdfPage: board.appState.notePdfPage } : {}), ...(references.length ? { noteReferences: references } : {}) };
+}
+export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Settings; client: SupabaseClient | null; onSaved: () => void; onMessage: (text: string) => void; onImageState: (state: BoardImageState) => void; jumpId?: string; boards?: Board[]; pageNav?: PageBoardNav }>(function BoardCanvas({ board, settings, client, onSaved, onMessage, onImageState, jumpId, boards = [], pageNav }, ref) {
   const [ready, setReady] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const apiRef = useRef(api); apiRef.current = api;
@@ -66,6 +73,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
   const [viewLocked, setViewLocked] = useState(!!board.appState.noteViewLock);
   const [snapping, setSnapping] = useState(() => restoreSnapping(board.appState));
   const viewLock = useRef<ViewLock | null>(board.appState.noteViewLock || null);
+  const [references, setReferences] = useState<string[]>(() => Array.isArray(board.appState.noteReferences) ? board.appState.noteReferences : []);
+  const referencesRef = useRef(references); referencesRef.current = references;
   const previousTool = useRef<string>('selection');
   const correcting = useRef(false);
   const [reading, setReading] = useState(false);
@@ -104,7 +113,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       // multiple board Undo entries. Its SVG is regenerated on the next open.
       const scene = repairRichTextElements(structuredClone(draft));
       repairDiagramElements(scene.elements);
-      pending.current = { elements: scene.elements, state: { ...cleanAppState(canvasApi.getAppState()), noteViewLock: viewLock.current }, files: { ...canvasApi.getFiles() } };
+      pending.current = { elements: scene.elements, state: { ...cleanAppState(canvasApi.getAppState()), noteViewLock: viewLock.current, ...documentState(board, referencesRef.current) }, files: { ...canvasApi.getFiles() } };
     }
     const snapshot = pending.current; pending.current = null;
     if (snapshot) {
@@ -203,7 +212,7 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       setEmpty(!elements.some(x => !x.isDeleted) && !state.editingTextElement);
     }
     const content = lastContent.current!;
-    const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current }; const signature = sceneSignature(elements, clean, content.signature);
+    const clean = { ...cleanAppState(state), ...(correction || {}), noteViewLock: viewLock.current, ...documentState(board, referencesRef.current) }; const signature = sceneSignature(elements, clean, content.signature);
     if (!booted.current) { booted.current = true; setReady(true); if (!repaired) { lastSignature.current = signature; return; } }
     if (lastSignature.current === signature) return;
     lastSignature.current = signature;
@@ -236,6 +245,10 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     if (!api) return;
     const state = api.getAppState(); viewLock.current = viewLock.current ? null : { zoom: state.zoom };
     setViewLocked(!!viewLock.current); changed(api.getSceneElementsIncludingDeleted(), state, api.getFiles());
+  }
+  function changeReferences(next: string[]) {
+    referencesRef.current = next; setReferences(next);
+    if (api) changed(api.getSceneElementsIncludingDeleted(), api.getAppState(), api.getFiles());
   }
   function changeSnapping(mode: SnapMode, size = api?.getAppState().gridSize) {
     api?.updateScene({ appState: snapState(mode, size), captureUpdate: CaptureUpdateAction.NEVER });
@@ -337,6 +350,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
       if (signature === lastSignature.current && !boardContentChanged(displayed, current)) { saveAnchor.current = current; return; }
       lastSignature.current = signature;
       viewLock.current = board.appState.noteViewLock || null; setViewLocked(!!viewLock.current);
+      const incoming = Array.isArray(board.appState.noteReferences) ? board.appState.noteReferences : [];
+      referencesRef.current = incoming; setReferences(incoming);
       api.updateScene({ elements: board.elements, appState: { ...api.getAppState(), ...board.appState, ...restoreSnapping(board.appState) } });
       saveAnchor.current = current;
     }).catch(error => onMessage(String(error)));
@@ -363,6 +378,8 @@ export const BoardCanvas = forwardRef<CanvasHandle, { board: Board; settings: Se
     {api && ready && <CaptureTools api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <WritingTools ref={writing} api={api} root={canvasRoot} onMessage={onMessage} />}
     {api && ready && <RichTextTools ref={richText} api={api} root={canvasRoot} />}
+    {api && ready && <PdfPageTools api={api} root={canvasRoot} scope={board.scope} client={client} nav={pageNav} firstView={!board.appState.zoom} onMessage={onMessage} />}
+    {api && ready && !pdfPageRef(board) && <PdfReferences api={api} root={canvasRoot} board={board} boards={boards} scope={board.scope} client={client} references={references} onReferences={changeReferences} onMessage={onMessage} />}
     <BoardChrome ref={chrome} root={canvasRoot} />
     {reading && api && <ReadTextDialog api={api} board={board} client={client} onClose={() => setReading(false)} onMessage={onMessage} />}
   </div>;

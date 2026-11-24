@@ -1,0 +1,219 @@
+/* Documents: reader, page boards, word selection, the reference bar, and library cards. */
+:root{--paper:#fff;--desk:#eeedf1;--desk-line:#e1dfe6;--hit:#fde04780;--hit-strong:#facc15}
+:root[data-theme=dark]{--desk:#1c1b20;--desk-line:#34313b;--hit:#facc1559;--hit-strong:#eab308}
+
+/* Reader */
+.pdf-reader{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--desk)}
+.pdf-toolbar{display:flex;align-items:center;gap:10px;min-height:50px;padding:7px 16px;border-bottom:1px solid var(--line);background:var(--bg);flex-wrap:wrap;position:relative;z-index:2}
+.pdf-toolbar select{width:auto;height:30px;padding:0 26px 0 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:500 12px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums}
+.pdf-segmented{display:inline-flex;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.pdf-segmented button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;color:var(--muted);font:500 12px 'DM Sans',sans-serif;transition:background .15s,color .15s}
+.pdf-segmented button:hover{color:var(--ink)}
+.pdf-segmented button[aria-pressed=true]{background:var(--accent-light);color:var(--accent)}
+.pdf-zoom,.pdf-pager{display:inline-flex;align-items:center;gap:2px}
+.pdf-toolbar label.pdf-tile-size{display:inline-flex;flex-direction:row;align-items:center;gap:8px;margin:0;font-size:11px;font-weight:500;color:var(--muted)}
+.pdf-toolbar .pdf-tile-size input[type=range]{width:120px;padding:0;border:0;background:none;accent-color:var(--accent)}
+.pdf-page-input{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pdf-toolbar .pdf-page-input input[inputmode]{width:44px;height:30px;padding:0;text-align:center;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:550 12px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums}
+.pdf-page-input input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.pdf-annotated{display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:11px;color:var(--muted)}
+.pdf-annotated>svg{color:var(--accent)}
+.pdf-annotated>span{margin-right:2px;white-space:nowrap}
+.pdf-annotated button{min-width:24px;height:24px;padding:0 6px;border-radius:6px;background:var(--accent-light);color:var(--accent);font:600 11px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums;transition:background .15s}
+.pdf-annotated button:hover,.pdf-annotated button[aria-current=true]{background:var(--accent);color:#fff}
+.pdf-annotated-more{font-weight:550}
+.pdf-search{margin-left:auto;display:flex;align-items:center;gap:4px}
+.pdf-toolbar .pdf-search input[type=search]{width:0;opacity:0;padding:0;border:1px solid transparent;height:32px;border-radius:8px;background:var(--panel);color:var(--ink);font:400 12px 'DM Sans',sans-serif;transition:width .2s cubic-bezier(.2,.8,.2,1),opacity .15s,padding .2s}
+.pdf-toolbar .pdf-search.is-open input[type=search]{width:min(240px,40vw);opacity:1;padding:0 10px;border-color:var(--line)}
+.pdf-toolbar .pdf-search.is-open input[type=search]:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.pdf-search.is-open .pdf-search-toggle{color:var(--accent)}
+.pdf-body{flex:1;min-height:0;display:flex;position:relative}
+.pdf-scroll{flex:1;min-width:0;overflow:auto;overscroll-behavior:contain;outline:none;scrollbar-color:#b8b2c4 transparent}
+.pdf-pages{position:relative;min-width:100%}
+.pdf-page{position:absolute;left:50%;transform:translateX(-50%);background:var(--paper);border-radius:2px;box-shadow:0 1px 2px #2a243714,0 8px 24px #2a24371a;contain:layout paint}
+.pdf-page:not(.is-drawn){background:linear-gradient(100deg,#fff 40%,#f5f4f8 50%,#fff 60%) 0 0/300% 100%;animation:pdf-wait 1.4s ease-in-out infinite}
+@keyframes pdf-wait{to{background-position:-100% 0}}
+.pdf-page canvas{position:absolute;inset:0;width:100%;height:100%;border-radius:2px}
+.pdf-page-number{position:absolute;left:50%;bottom:-27px;transform:translateX(-50%);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pdf-page-actions{position:absolute;top:10px;right:10px;z-index:3;display:flex;gap:6px}
+.pdf-annotate,.pdf-notes-badge{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;font:550 12px 'DM Sans',sans-serif;white-space:nowrap;box-shadow:0 2px 10px #2a243724;transition:opacity .18s,transform .18s cubic-bezier(.2,.8,.2,1),background .15s}
+.pdf-annotate{background:var(--panel);color:var(--ink);border:1px solid var(--line);opacity:0;transform:translateY(-3px)}
+.pdf-page:hover .pdf-annotate,.pdf-annotate:focus-visible,.pdf-tile-foot .pdf-annotate{opacity:1;transform:none}
+.pdf-annotate:hover{background:var(--accent-light);color:var(--accent);border-color:transparent}
+.pdf-notes-badge{background:var(--accent);color:#fff}
+.pdf-notes-badge:hover{background:#6651c4}
+@media (hover:none){.pdf-annotate{opacity:1;transform:none}}
+.pdf-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;height:100%;min-height:240px;color:var(--muted);font-size:13px;text-align:center;padding:24px}
+.pdf-state p{max-width:46ch;line-height:1.6}
+
+/* Highlights made on the page's board, shown while reading. */
+.pdf-marks{position:absolute;inset:0;pointer-events:none;mix-blend-mode:multiply}
+.pdf-marks i{position:absolute;opacity:.42;border-radius:1px}
+
+/* pdf.js text layer: transparent words over the picture, selectable. */
+.pdf-text-layer{position:absolute;inset:0;overflow:clip;line-height:1;text-align:initial;transform-origin:0 0;forced-color-adjust:none;--min-font-size:1;--text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size));--min-font-size-inv:calc(1 / var(--min-font-size));z-index:1}
+.pdf-text-layer :is(span,br){color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0;user-select:text;-webkit-user-select:text}
+.pdf-text-layer>:not(.markedContent),.pdf-text-layer .markedContent span:not(.markedContent){--font-height:0;font-size:calc(var(--text-scale-factor) * var(--font-height));--scale-x:1;--rotate:0deg;transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv))}
+.pdf-text-layer .markedContent{display:contents}
+.pdf-text-layer ::selection{background:color-mix(in srgb,var(--accent) 32%,transparent);color:transparent}
+.pdf-text-layer br::selection{background:transparent}
+.pdf-text-layer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:0;cursor:default;user-select:none}
+.pdf-text-layer.selecting .endOfContent{top:0}
+.pdf-text-layer span.pdf-hit{background:var(--hit);border-radius:2px;box-shadow:0 0 0 1px var(--hit)}
+
+/* Search results beside the pages */
+.pdf-results{width:300px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--bg);min-height:0}
+.pdf-results header{display:flex;align-items:center;gap:8px;padding:12px 10px 10px 16px;border-bottom:1px solid var(--line);font-size:12px}
+.pdf-results header small{color:var(--muted)}
+.pdf-results header button{margin-left:auto}
+.pdf-results ol{list-style:none;margin:0;padding:6px;overflow:auto}
+.pdf-results li button{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:9px 10px;border-radius:8px;transition:background .15s}
+.pdf-results li button:hover,.pdf-results li button[aria-current=true]{background:var(--sidebar)}
+.pdf-result-head{display:flex;align-items:center;gap:8px;font-size:12px;font-variant-numeric:tabular-nums}
+.pdf-result-head em{display:inline-flex;align-items:center;gap:4px;font-style:normal;font-size:10px;font-weight:550;color:var(--accent);background:var(--accent-light);padding:2px 6px;border-radius:999px}
+.pdf-result-text{font-size:11px;line-height:1.55;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.pdf-result-text mark,.pdf-ref-hits mark{background:var(--hit);color:var(--ink);border-radius:2px;padding:0 1px}
+.pdf-results-empty{padding:16px;font-size:12px;line-height:1.6;color:var(--muted)}
+
+/* Tiles */
+.pdf-scroll.is-tiles{padding:24px}
+.pdf-tiles{list-style:none;margin:0 auto;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--tile),1fr));gap:22px 18px;max-width:1800px}
+.pdf-tiles li{display:flex;flex-direction:column;gap:8px;min-width:0}
+.pdf-tile{display:block;width:100%;background:var(--paper);border-radius:3px;box-shadow:0 1px 2px #2a243714,0 6px 18px #2a243714;overflow:hidden;aspect-ratio:var(--ratio,.77);transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s}
+.pdf-tile:hover{transform:translateY(-2px);box-shadow:0 1px 2px #2a243714,0 12px 26px #2a243724}
+.pdf-tiles li.is-current .pdf-tile{outline:2px solid var(--accent);outline-offset:3px}
+.pdf-tile img{display:block;width:100%;height:100%;object-fit:contain}
+.pdf-tile-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pdf-tile-foot .pdf-annotate,.pdf-tile-foot .pdf-notes-badge{height:26px;padding:0 9px;font-size:11px;box-shadow:none}
+.pdf-thumb-wait{display:block;width:100%;height:100%;min-height:60px;background:linear-gradient(100deg,#fff 40%,#f4f3f7 50%,#fff 60%) 0 0/300% 100%;animation:pdf-wait 1.4s ease-in-out infinite}
+
+/* A page's own board */
+.pdf-page-bar{position:absolute;z-index:7;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;max-width:calc(100% - 24px);padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 8px 28px #2a24371f;font-size:12px;flex-wrap:wrap;justify-content:center}
+.pdf-page-bar>button:not(.icon-button){display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;border-radius:8px;color:var(--ink);font:500 12px 'DM Sans',sans-serif;white-space:nowrap;transition:background .15s,color .15s}
+.pdf-page-bar>button:not(.icon-button):hover:not(:disabled),.pdf-page-bar>button[aria-pressed=true],.pdf-page-bar>button[aria-expanded=true]{background:var(--accent-light);color:var(--accent)}
+.pdf-page-bar>button.is-ai{color:var(--accent)}
+.pdf-page-bar>button:disabled{opacity:.45}
+.pdf-page-bar .icon-button{width:32px;height:32px}
+.pdf-bar-back{font-weight:550!important}
+.pdf-bar-page{padding:0 4px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pdf-bar-page span{font-weight:400;color:var(--muted)}
+.pdf-bar-divider{width:1px;align-self:stretch;margin:6px 4px;background:var(--line);flex:none}
+.pdf-page-ask{display:flex;align-items:flex-end;gap:4px;flex-basis:100%;padding:4px 2px 2px}
+.pdf-page-ask textarea,.pdf-select-ask textarea{width:auto;flex:1;min-width:0;min-height:34px;max-height:120px;resize:none;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:400 13px/1.4 'DM Sans',sans-serif}
+.pdf-page-ask textarea:focus,.pdf-select-ask textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.pdf-select-send{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;background:#7760d5;color:#fff;flex:none}
+.pdf-select-send:disabled{opacity:.4}
+
+/* Selecting words on a page picture */
+.pdf-text-mode{position:absolute;left:0;top:0;z-index:5;transform-origin:0 0;outline:none;cursor:text;user-select:text;-webkit-user-select:text;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);border-radius:1px;background:color-mix(in srgb,var(--accent) 4%,transparent);opacity:0;transition:opacity .18s}
+.pdf-text-mode.is-ready{opacity:1}
+.pdf-text-done{position:absolute;z-index:8;left:50%;top:76px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:5px 5px 5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);box-shadow:var(--shadow);font-size:12px;color:var(--ink);white-space:nowrap;animation:pdf-rise .2s cubic-bezier(.2,.8,.2,1)}
+.pdf-text-done>svg{color:var(--accent)}
+.pdf-text-done button{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px;border-radius:999px;background:var(--accent);color:#fff;font:550 12px 'DM Sans',sans-serif}
+.pdf-select-bar{position:absolute;z-index:9;display:flex;align-items:center;gap:2px;padding:4px;transform:translate(-50%,-100%);border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 10px 30px #2a243726;animation:pdf-rise .16s cubic-bezier(.2,.8,.2,1);max-width:calc(100% - 16px)}
+.pdf-select-bar.is-below{transform:translate(-50%,0)}
+.pdf-select-bar>button{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 9px;border-radius:7px;color:var(--ink);font:500 12px 'DM Sans',sans-serif;white-space:nowrap;transition:background .15s,color .15s}
+.pdf-select-bar>button:hover{background:var(--accent-light);color:var(--accent)}
+.pdf-select-bar>button.is-ai{color:var(--accent);font-weight:550}
+.pdf-swatches{display:inline-flex;gap:3px;padding:0 4px}
+.pdf-swatches button{width:18px;height:18px;border-radius:50%;background:var(--swatch);box-shadow:inset 0 0 0 1px #0000001f;transition:transform .15s}
+.pdf-swatches button:hover{transform:scale(1.12)}
+.pdf-swatches button[aria-checked=true]{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.pdf-select-ask{display:flex;flex-direction:column;gap:6px;width:min(380px,calc(100vw - 32px));padding:2px}
+.pdf-select-ask>div{display:flex;align-items:flex-end;gap:4px}
+.pdf-select-ask>div>button[type=button]{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;color:var(--muted)}
+.pdf-select-quote{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 4px}
+@keyframes pdf-rise{from{opacity:0;translate:0 4px}}
+
+/* Reference bar on a board */
+.pdf-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:650;font-variant-numeric:tabular-nums}
+.pdf-references-trigger[aria-pressed=true]{background:var(--accent-light);color:var(--accent)}
+.pdf-references{position:absolute;z-index:9;top:12px;right:12px;bottom:12px;width:min(360px,calc(100% - 24px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 18px 50px #2a24372b;overflow:hidden;animation:pdf-slide .22s cubic-bezier(.2,.8,.2,1);transition:width .24s cubic-bezier(.2,.8,.2,1)}
+.pdf-references.is-wide{width:min(700px,calc(100% - 24px))}
+@keyframes pdf-slide{from{opacity:0;translate:12px 0}}
+.pdf-ref-head{display:flex;align-items:center;gap:6px;padding:10px 8px 10px 14px;border-bottom:1px solid var(--line)}
+.pdf-ref-head h2{flex:1;min-width:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pdf-ref-icon{color:var(--accent);flex:none}
+.pdf-ref-tools{display:flex;flex-direction:column;gap:8px;padding:12px 12px 4px}
+.pdf-ref-search{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted)}
+.pdf-ref-search:focus-within{outline:2px solid var(--accent);outline-offset:-1px}
+.pdf-references .pdf-ref-search input[type=search]{flex:1;padding:0;border-radius:0;min-width:0;border:0;background:none;color:var(--ink);font:400 12px 'DM Sans',sans-serif;outline:none}
+.pdf-ref-actions{display:grid;grid-template-columns:1fr auto;gap:6px}
+.pdf-ref-actions .primary-button,.pdf-ref-actions .secondary-button{padding:9px 11px;font-size:12px}
+.pdf-ref-progress{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.pdf-ref-list{list-style:none;margin:0;padding:6px 8px 12px;overflow:auto;flex:1}
+.pdf-ref-list li{position:relative;display:flex;align-items:center;gap:2px}
+.pdf-ref-doc{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:9px;text-align:left;transition:background .15s}
+.pdf-ref-doc:hover{background:var(--sidebar)}
+.pdf-ref-doc-icon{display:grid;place-items:center;width:34px;height:42px;flex:none;border-radius:4px;background:var(--accent-light);color:var(--accent)}
+.pdf-ref-doc-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pdf-ref-doc-text strong{font-size:12px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pdf-ref-doc-text strong em{font-style:normal;color:var(--accent);font-weight:550}
+.pdf-ref-doc-text small{font-size:11px;line-height:1.5;color:var(--muted)}
+.pdf-ref-hits .pdf-ref-doc-text small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pdf-ref-pick{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:550;color:var(--accent);flex:none}
+.pdf-ref-remove{opacity:0;transition:opacity .15s}
+.pdf-ref-list li:hover .pdf-ref-remove,.pdf-ref-remove:focus-visible{opacity:1}
+@media (hover:none){.pdf-ref-remove{opacity:1}}
+.pdf-ref-confirm{display:flex;gap:4px;flex:none}
+.pdf-ref-confirm button{height:28px;padding:0 9px;border-radius:7px;border:1px solid var(--line);font:550 11px 'DM Sans',sans-serif}
+.pdf-ref-confirm button.danger{border-color:transparent;background:#c06d78;color:#fff}
+.pdf-ref-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:36px 24px;text-align:center;color:var(--muted);font-size:12px;line-height:1.6}
+.pdf-ref-empty>svg{color:var(--accent);margin-bottom:4px}
+.pdf-ref-empty strong{color:var(--ink);font-size:13px;font-weight:600}
+.pdf-ref-empty small{font-size:11px;opacity:.85}
+.pdf-ref-pages{flex:1;min-height:0;display:flex;flex-direction:column}
+.pdf-ref-notes-toggle{flex-direction:row;margin:10px 12px 2px;padding:10px 12px;border-radius:10px;background:var(--accent-light)}
+.pdf-ref-notes-toggle strong{font-size:12px}
+.pdf-ref-pages ol{list-style:none;margin:0;padding:12px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:16px}
+.pdf-ref-pages li{display:flex;flex-direction:column;gap:7px}
+.pdf-ref-pages li.is-target .pdf-ref-page{outline:2px solid var(--accent);outline-offset:3px}
+.pdf-ref-page{background:var(--paper);border-radius:3px;box-shadow:0 1px 2px #2a243714,0 6px 18px #2a24371a;overflow:hidden;cursor:grab}
+.pdf-ref-page:active{cursor:grabbing}
+.pdf-ref-page img{display:block;width:100%;height:100%;object-fit:contain}
+.pdf-ref-page-foot{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pdf-ref-page-notes{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-weight:600}
+.pdf-ref-add{margin-left:auto;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:8px;background:var(--accent-light);color:var(--accent);font:600 12px 'DM Sans',sans-serif;transition:background .15s,color .15s}
+.pdf-ref-add:hover:not(:disabled){background:var(--accent);color:#fff}
+.pdf-ref-add:disabled{opacity:.6}
+
+/* Library */
+.new-document-button{display:flex;align-items:center;gap:10px;width:100%;margin:-12px 0 21px;padding:10px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-weight:500;font-size:12px;transition:background .15s,border-color .15s}
+.new-document-button:hover:not(:disabled){border-color:#cfbfdc;background:var(--accent-light);color:var(--accent)}
+.new-document-button:disabled{color:var(--muted)}
+.doc-grid{margin-bottom:37px}
+.doc-thumbnail{display:flex;align-items:flex-end;justify-content:center;padding:22px 22px 0;background:linear-gradient(180deg,#eeedf4,#e7e5ef)}
+:root[data-theme=dark] .doc-thumbnail{background:linear-gradient(180deg,#2f2d37,#28262f)}
+.doc-cover{display:grid;place-items:center;height:100%;max-width:78%;background:var(--paper);border-radius:3px 3px 0 0;box-shadow:0 -1px 0 #0000000a,0 6px 18px #2a24371f;color:#b5abc6;overflow:hidden;transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+.board-card:hover .doc-cover{transform:translateY(-3px)}
+.doc-cover img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
+.doc-chip{position:absolute;left:12px;top:12px;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:var(--panel);color:var(--ink);font-size:10px;font-weight:550;box-shadow:0 1px 4px #2a243714;font-variant-numeric:tabular-nums}
+.doc-chip-notes{left:auto;right:12px;background:var(--accent);color:#fff}
+.doc-drop{min-height:232px}
+.doc-drop.is-busy{cursor:progress;border-style:solid;background:var(--accent-light)}
+.doc-drop strong{max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-drop small{max-width:85%;text-align:center;line-height:1.5}
+.library.is-dropping{outline:2px dashed var(--accent);outline-offset:-12px;border-radius:18px;background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.breadcrumbs .breadcrumb-static{cursor:default}
+
+@media(max-width:760px){
+  .pdf-toolbar{gap:6px;padding:6px 10px}
+  .pdf-segmented button span,.pdf-annotated>span,.pdf-tile-size span{display:none}
+  .pdf-annotated button:nth-of-type(n+4),.pdf-annotated-more{display:none}
+  .pdf-results{position:absolute;inset:auto 0 0 0;width:auto;max-height:45%;border-left:0;border-top:1px solid var(--line);box-shadow:0 -8px 24px #2a24371a;z-index:3}
+  .pdf-toolbar .pdf-search.is-open input[type=search]{width:min(180px,45vw)}
+  .pdf-page-bar{bottom:84px;flex-wrap:nowrap;gap:0;padding:3px}
+  .pdf-page-bar:has(.pdf-page-ask){flex-wrap:wrap}
+  .pdf-page-bar>button:not(.icon-button) span,.pdf-page-bar .pdf-bar-divider,.pdf-bar-page>span{display:none}
+  .pdf-page-bar>button:not(.icon-button){padding:0 10px;height:40px}
+  .pdf-page-bar .icon-button{width:36px;height:40px}
+  .pdf-bar-page{padding:0 2px;font-size:12px}
+  .pdf-text-done{top:auto;bottom:86px}
+  .pdf-references,.pdf-references.is-wide{top:0;right:0;bottom:0;width:100%;border-radius:0;border:0}
+  .pdf-scroll.is-tiles{padding:14px}
+  .pdf-tiles{gap:16px 12px}
+}
+@media (prefers-reduced-motion:reduce){
+  .pdf-page:not(.is-drawn),.pdf-thumb-wait{animation:none}
+  .pdf-references,.pdf-select-bar,.pdf-text-done{animation:none}
+}

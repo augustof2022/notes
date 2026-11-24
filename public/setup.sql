@@ -250,8 +250,13 @@ revoke all on function public.purge_note_trash(jsonb, jsonb) from public, anon;
 grant execute on function public.purge_note_trash(jsonb, jsonb) to authenticated;
 
 insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_types)
-values ('note-images', 'note-images', false, 20971520, array['image/png','image/jpeg','image/webp','image/gif','image/svg+xml'])
+values ('note-images', 'note-images', false, 52428800, array['image/png','image/jpeg','image/webp','image/gif','image/svg+xml','application/pdf'])
 on conflict (id) do nothing;
+-- Documents (PDF, and Word converted to PDF) share the image bucket.
+update storage.buckets
+set allowed_mime_types = array['image/png','image/jpeg','image/webp','image/gif','image/svg+xml','application/pdf'],
+    file_size_limit = greatest(coalesce(file_size_limit, 0), 52428800)
+where id = 'note-images';
 drop policy if exists note_images_select on storage.objects;
 create policy note_images_select on storage.objects for select to authenticated using (bucket_id = 'note-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
 drop policy if exists note_images_insert on storage.objects;

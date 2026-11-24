@@ -4,6 +4,8 @@ export { disconnectDrive, DRIVE_SCOPE, driveConnected, getDriveStatus, googleSig
 export type { DriveStatus } from './drive-auth';
 
 let folder: { owner: string; generation: number; promise: Promise<string> } | null = null;
+/** Drive's one-request (multipart) upload takes files up to 5 MB. */
+const MULTIPART_LIMIT = 5 * 1024 * 1024;
 class DriveRequestError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -65,10 +67,21 @@ export async function uploadDriveImage(id: string, owner: string, blob: Blob) {
   const lookup = await driveFetch(`drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1`, owner);
   const existing = await lookup.json(); assertGeneration(version);
   if (existing.files?.[0]) return existing.files[0].id as string;
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify({ name: `note-${id}.${blob.type.includes('webp') ? 'webp' : 'png'}`, parents: [parent], appProperties: { assetId: id, owner } })], { type: 'application/json' }));
-  form.append('file', blob);
-  const response = await driveFetch('upload/drive/v3/files?uploadType=multipart&fields=id', owner, { method: 'POST', body: form });
+  const metadata = { name: `note-${id}.${blob.type.includes('pdf') ? 'pdf' : blob.type.includes('webp') ? 'webp' : 'png'}`, parents: [parent], appProperties: { assetId: id, owner } };
+  let response: Response;
+  if (blob.size > MULTIPART_LIMIT) {
+    // Drive takes larger files (documents) through a resumable session: metadata first, then the bytes.
+    const session = await driveFetch('upload/drive/v3/files?uploadType=resumable&fields=id', owner, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': blob.type || 'application/octet-stream', 'X-Upload-Content-Length': String(blob.size) }, body: JSON.stringify(metadata) });
+    const location = session.headers.get('Location');
+    if (!location?.startsWith('https://www.googleapis.com/')) throw new Error('Google Drive did not start the upload. Retry sync.');
+    assertGeneration(version);
+    response = await driveFetch(location.slice('https://www.googleapis.com/'.length), owner, { method: 'PUT', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+  } else {
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', blob);
+    response = await driveFetch('upload/drive/v3/files?uploadType=multipart&fields=id', owner, { method: 'POST', body: form });
+  }
   const uploadedId = (await response.json()).id as string; assertGeneration(version);
   return uploadedId;
 }

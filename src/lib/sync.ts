@@ -6,6 +6,7 @@ import { blobToDataURL, dataURLToBlob } from './assets';
 import { downloadDriveImage, uploadDriveImage } from './drive';
 import { imageReady, pendingSyncItems, pendingSyncLabel, syncErrorMessage } from './sync-status';
 import { saveCloudRecord } from './sync-save';
+import { isPdfAsset } from './pdf-model';
 import { applySyncData, reconcileSyncData, recordData, sameSyncedContent, withLocalView } from './sync-merge';
 
 type CloudRow = Record<string, any>;
@@ -237,14 +238,15 @@ export async function syncWorkspace(client: SupabaseClient, scope: string, setti
     try {
       let storage = asset.storage, remotePath = asset.remotePath;
       if (!remotePath) {
-        if (!asset.dataURL) throw new Error('Image file is missing here. Open Note on the device where you added it, then retry uploads.');
-        const blob = await dataURLToBlob(asset.dataURL);
+        const pdf = isPdfAsset(asset);
+        const blob = pdf ? (await db.files.get(asset.key))?.blob : asset.dataURL ? await dataURLToBlob(asset.dataURL) : undefined;
+        if (!blob) throw new Error(`${pdf ? 'Document' : 'Image'} file is missing here. Open Note on the device where you added it, then retry uploads.`);
         storage = settings.imageStore;
         if (storage === 'drive') remotePath = await uploadDriveImage(asset.id, scope, blob);
         else {
           remotePath = `${scope}/${asset.id}`;
           const { error } = await client.storage.from('note-images').upload(remotePath, blob, { contentType: asset.mimeType, upsert: true });
-          if (error) throw error;
+          if (error) throw pdf && /mime|content.?type|not supported|size/i.test(error.message) ? new Error(`Supabase Storage is not set up for documents yet. Run the one-time document SQL update (enable-documents.sql), or store files in Google Drive.`) : error;
         }
         await db.assets.update(asset.key, { storage, remotePath });
       }

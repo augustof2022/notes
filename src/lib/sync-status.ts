@@ -28,7 +28,8 @@ export function pendingSyncItems(boards: Board[], folders: Folder[], assets: Ass
   }
   for (const asset of assets.filter(asset => asset.dirty)) {
     const names = boards.filter(board => !board.deleted && board.assetIds.includes(asset.id)).map(board => board.name);
-    pending.push({ key: asset.key, kind: 'image', name: names.length ? `Image in ${names.join(', ')}` : 'Image', failed: !!asset.syncError,
+    const label = asset.mimeType === 'application/pdf' ? 'Document file' : 'Image';
+    pending.push({ key: asset.key, kind: 'image', name: names.length ? `${label} in ${names.join(', ')}` : label, failed: !!asset.syncError,
       reason: asset.syncError || (!asset.remotePath ? 'Waiting to upload the image file.' : !imageReady(asset) ? 'File uploaded; waiting to register its location in the cloud.' : 'File uploaded; waiting to sync searchable text or image metadata.') });
   }
   return pending;
